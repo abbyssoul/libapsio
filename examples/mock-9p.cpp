@@ -14,7 +14,7 @@
 *  limitations under the License.
 */
 
-#include <apsio/server.hpp>
+#include <apsio/simpleServer.hpp>
 
 #include <solace/output_utils.hpp>
 #include <dialstring/ostream.hpp>
@@ -104,7 +104,7 @@ int main(int argc, char* const* argv) {
 		iocontext.stop();
 	});
 
-	auto mockServer = apsio::SimpleServer{iocontext, vfs, getSystemHeapMemoryManager()};
+	auto mockServer = apsio::SimpleServer{iocontext, vfs};
 	auto maybeListener = mockServer.listen(*maybeBind, mv(config));
 	if (!maybeListener) {
 		return logAndExit("Error attempting to listen", maybeListener);

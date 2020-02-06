@@ -18,7 +18,7 @@
  *	@file test/test_server.cpp
  *	@brief		Test suit for apsio::Server
  ******************************************************************************/
-#include <apsio/server.hpp>    // Class being tested.
+#include <apsio/simpleServer.hpp>    // Class being tested.
 
 #include "asio_utils.hpp"
 #include <filesystem>  // temp_directory_path
@@ -51,7 +51,7 @@ protected:
 	MemoryManager::size_type _baseMem;
 };
 
-}  // namespace anonymous
+}  // anonymous namespace
 
 
 

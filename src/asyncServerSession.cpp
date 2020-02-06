@@ -36,7 +36,7 @@ void apsio::logConnection(asio::ip::tcp::socket const& channel) {
 }
 
 
-//NOTE: The only reason to have it here - is to not emit vtable in each translation unit.
+// NOTE: The only reason to have it here - is to not emit vtable in each translation unit.
 void AsyncSessionBase::start() {}
 
 
@@ -60,11 +60,6 @@ mapType(kasofs::VfsId nodeType) noexcept {
 	if (nodeType == kasofs::Vfs::kVfsTypeDirectory) {
 		return styxe::QidType::DIR;
 	}
-
-//	case kasofs::INode::Type::Data:        return styxe::QidType::FILE;
-//    case vfs::INode::Type::Synthetic:   return styxe::QidType::TMP;
-//    case vfs::INode::Type::SyntheticDir:   return styxe::QidType::DIR;
-//	}
 
 	// NOTE: We probably should halt at this point
 	return styxe::QidType::FILE;
@@ -115,11 +110,14 @@ StringView selectProtocol(StringView requestedVersion) {
 		return styxe::kUnknownProtocolVersion;
 	}
 
-//	// If we can only server sub-version
-//	if (req.version.startsWith(parser.PROTOCOL_VERSION)) {
-//		negotiatedVersion = parser.PROTOCOL_VERSION;
-//	} else if (parser.PROTOCOL_VERSION.startsWith(req.version))
-//		negotiatedVersion = req.version;
+	// If we can only server sub-version
+	/*
+	if (req.version.startsWith(parser.PROTOCOL_VERSION)) {
+		negotiatedVersion = parser.PROTOCOL_VERSION;
+	} else if (parser.PROTOCOL_VERSION.startsWith(req.version))
+		negotiatedVersion = req.version;
+	}
+	*/
 
 	return styxe::kProtocolVersion;
 }
@@ -138,12 +136,12 @@ unsupportedMessage() /*noexcept */{
 }
 
 
-}  // namespace anonymous
+}  // anonymous namespace
 
 
 
 apsio::Result<AuthFile&>
-UnauthenticatedSessionHandler::beginAuthentication(styxe::Fid afid, StringView uname, StringView resource) {
+UnauthenticatedSessionHandler::beginAuthentication(styxe::Fid afid, StringView uname, StringView resource, uint32 uid) {
 	auto& strategy = authPolicy()->findAuthStrategyFor({uname, resource});
 
 	auto it = _fidToAuth.try_emplace(afid, AuthFile{uname, resource, strategy});
@@ -152,7 +150,7 @@ UnauthenticatedSessionHandler::beginAuthentication(styxe::Fid afid, StringView u
 
 
 apsio::Result<kasofs::User>
-UnauthenticatedSessionHandler::authenticate(styxe::Fid afid, StringView name, StringView resource) {
+UnauthenticatedSessionHandler::authenticate(styxe::Fid afid, StringView name, StringView resource, uint32 uid) {
 	auto it = _fidToAuth.find(afid);
 	if (it == _fidToAuth.end()) {
 		return makeError(GenericError::IO, "authenticate");
@@ -175,48 +173,57 @@ UnauthenticatedSessionHandler::findAuthForFid(styxe::Fid fid) {
 
 
 struct BaseRequestVisiter {
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Version const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Auth const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Flush const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Attach const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Walk const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Open const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Create const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Read const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Write const&){ return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Clunk const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Remove const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Stat const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::WStat const&) { return unsupportedMessage(); }
+#define DECLARE(T) \
+	apsio::Result<SessionStateTransition> operator()(T const&) { return unsupportedMessage(); }
 
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Auth const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Attach const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Create const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::WStat const&) { return unsupportedMessage(); }
+	// Base 9P2000 protocol
+	DECLARE(styxe::Request::Version)
+	DECLARE(styxe::Request::Auth)
+	DECLARE(styxe::Request::Flush)
+	DECLARE(styxe::Request::Attach)
+	DECLARE(styxe::Request::Walk)
+	DECLARE(styxe::Request::Open)
+	DECLARE(styxe::Request::Create)
+	DECLARE(styxe::Request::Read)
+	DECLARE(styxe::Request::Write)
+	DECLARE(styxe::Request::Clunk)
+	DECLARE(styxe::Request::Remove)
+	DECLARE(styxe::Request::Stat)
+	DECLARE(styxe::Request::WStat)
 
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000E::Request::Session const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000E::Request::ShortRead const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000E::Request::ShortWrite const&) { return unsupportedMessage(); }
+	// Handlers for 9P2000.U extention
+	DECLARE(styxe::_9P2000U::Request::Auth)
+	DECLARE(styxe::_9P2000U::Request::Attach)
+	DECLARE(styxe::_9P2000U::Request::Create)
+	DECLARE(styxe::_9P2000U::Request::WStat)
 
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::StatFS const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::LOpen const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::LCreate const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::Symlink const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::MkNode const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::Rename const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::ReadLink const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::GetAttr const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::SetAttr const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::XAttrWalk const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::XAttrCreate const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::ReadDir const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::FSync const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::Lock const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::GetLock const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::Link const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::MkDir const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::RenameAt const&) { return unsupportedMessage(); }
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000L::Request::UnlinkAt const&) { return unsupportedMessage(); }
+	// Handlers for 9P2000.E extention
+	DECLARE(styxe::_9P2000E::Request::Session)
+	DECLARE(styxe::_9P2000E::Request::ShortRead)
+	DECLARE(styxe::_9P2000E::Request::ShortWrite)
+
+	// Handlers for 9P2000.L extention
+	DECLARE(styxe::_9P2000L::Request::StatFS)
+	DECLARE(styxe::_9P2000L::Request::LOpen)
+	DECLARE(styxe::_9P2000L::Request::LCreate)
+	DECLARE(styxe::_9P2000L::Request::Symlink)
+	DECLARE(styxe::_9P2000L::Request::MkNode)
+	DECLARE(styxe::_9P2000L::Request::Rename)
+	DECLARE(styxe::_9P2000L::Request::ReadLink)
+	DECLARE(styxe::_9P2000L::Request::GetAttr)
+	DECLARE(styxe::_9P2000L::Request::SetAttr)
+	DECLARE(styxe::_9P2000L::Request::XAttrWalk)
+	DECLARE(styxe::_9P2000L::Request::XAttrCreate)
+	DECLARE(styxe::_9P2000L::Request::ReadDir)
+	DECLARE(styxe::_9P2000L::Request::FSync)
+	DECLARE(styxe::_9P2000L::Request::Lock)
+	DECLARE(styxe::_9P2000L::Request::GetLock)
+	DECLARE(styxe::_9P2000L::Request::Link)
+	DECLARE(styxe::_9P2000L::Request::MkDir)
+	DECLARE(styxe::_9P2000L::Request::RenameAt)
+	DECLARE(styxe::_9P2000L::Request::UnlinkAt)
+
+#undef DECLARE
 };
 
 
@@ -235,14 +242,14 @@ struct UnversionedRequestVisiter : public BaseRequestVisiter {
 		}
 
 		auto versionedParser = styxe::createRequestParser(negotiatedVersion, minMessageSize);
-		if (!versionedParser) {  // In case we failed to create a parser for selected version reply with 'UnknownProtocolVersion'
+		if (!versionedParser) {  // If failed to create a parser for the version, reply with 'UnknownProtocolVersion'
 			responseWriter << styxe::Response::Version{minMessageSize, styxe::kUnknownProtocolVersion};
 			return responseOk();
 		}
 
 		// Propose selected version and switch parser for a versioned one.
 		responseWriter << styxe::Response::Version{minMessageSize, negotiatedVersion};
-		return responseOkAndTransit(UnauthenticatedSessionHandler{versionedParser.moveResult(), authPolicy, mv(unversionedHandler)});
+		return transitTo<UnauthenticatedSessionHandler>(versionedParser.moveResult(), authPolicy, mv(unversionedHandler));
 	}
 
 	apsio::Result<SessionStateTransition>
@@ -251,8 +258,14 @@ struct UnversionedRequestVisiter : public BaseRequestVisiter {
 	}
 
 	apsio::Result<SessionStateTransition>
-	responseOkAndTransit(SessionHandler&& newSessionHandler) {
+	transit(SessionHandler&& newSessionHandler) {
 		return SessionStateTransition{responseWriter.header(), mv(newSessionHandler)};
+	}
+
+	template<typename NextState, typename...Args>
+	apsio::Result<SessionStateTransition>
+	transitTo(Args&&...args) {
+		return SessionStateTransition{responseWriter.header(), NextState{fwd<Args>(args)...}};
 	}
 
 
@@ -289,7 +302,10 @@ struct UnversionedRequestVisiter : public BaseRequestVisiter {
 	}
 
 
-	UnversionedRequestVisiter(styxe::Tag responseTag, ByteWriter& outputStream, UnversionedSessionHandler& handler, std::shared_ptr<Auth::Policy> auth)
+	UnversionedRequestVisiter(styxe::Tag responseTag,
+							  ByteWriter& outputStream,
+							  UnversionedSessionHandler& handler,
+							  std::shared_ptr<Auth::Policy> auth)
 		: unversionedHandler{handler}
 		, authPolicy{mv(auth)}
 		, responseWriter{outputStream, responseTag}
@@ -306,43 +322,27 @@ struct UnauthenticatedRequestVisiter: public UnversionedRequestVisiter {
 
 	using UnversionedRequestVisiter::operator();
 
-	auto responseOk() { return responseOkAndTransit(mv(_unauthenticatedHandler)); }
+	auto responseOk() { return transit(mv(_unauthenticatedHandler)); }
 	auto responseNAK(StringView message) { return error(mv(_unauthenticatedHandler), message); }
 	auto responseNAK(Error const& err) { return error(mv(_unauthenticatedHandler), err); }
-	auto responseNAK(GenericError errCode, StringView message) { return error(mv(_unauthenticatedHandler), errCode, message); }
-
-
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Auth const& req) {
-		// Prepare authentication mechanism for a new user idenfied as req.uname who wants to access resource req.aname
-
-		// SEC: Note: do NOT open a new auth file for each auth requiest - as it can lean to DoS
-
-		// TODO: Even if user name is not valid - but authentication is enabled - we should reply with ok, not error
-		auto maybeAuthFile = _unauthenticatedHandler.beginAuthentication(req.afid, req.uname, req.aname);
-		if (!maybeAuthFile) {
-			// ???? Internal server error! Close the session
-			responseWriter << styxe::Response::Auth{};
-			return responseOk();
-		}
-
-		auto& authFile = *maybeAuthFile;
-		if (!authFile.isAuthRequired()) {
-			return responseNAK("Auth not required");
-		}
-
-		responseWriter << styxe::Response::Auth{authQid(authFile)};
-		return responseOk();
+	auto responseNAK(GenericError errCode, StringView message) {
+		return error(mv(_unauthenticatedHandler), errCode, message);
 	}
 
+	apsio::Result<SessionStateTransition> operator()(styxe::Request::Auth const& req) {
+		return handleAuthRequest(req.afid, req.uname, req.aname, 0);
+	}
+
+	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Auth const& req) {
+		return handleAuthRequest(req.afid, req.uname, req.aname, req.n_uname);
+	}
 
 	apsio::Result<SessionStateTransition> operator()(styxe::Request::Attach const& req) {
-		auto user = _unauthenticatedHandler.authenticate(req.afid, req.uname, req.aname);
-		if (!user) {  // Authentication failed / incomplete
-			return responseNAK(GenericError::ACCES, "attach");
-		}
+		return handleAttachRequest(req.fid, req.afid, req.uname, req.aname, 0);
+	}
 
-		SessionProtocolHandler sessionHandler{*user, _vfs, mv(_unauthenticatedHandler)};
-		return responseOkAndTransit(mv(_unauthenticatedHandler));
+	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Attach const& req) {
+		return handleAttachRequest(req.fid, req.afid, req.uname, req.aname, req.n_uname);
 	}
 
 
@@ -352,9 +352,9 @@ struct UnauthenticatedRequestVisiter: public UnversionedRequestVisiter {
 		if (!maybeStrategy) {
 			return responseNAK("Not attached fid");
 		}
-//		AuthStrategy& strategy = (*maybeStrategy);
-
-//		responseWriter << styxe::Response::Read{*maybeBytesWritten};
+		// TODO(abbyssoul): not yet implemented
+		// AuthStrategy& strategy = (*maybeStrategy);
+		// responseWriter << styxe::Response::Read{*maybeBytesWritten};
 
 		return unsupportedMessage();
 	}
@@ -387,6 +387,53 @@ struct UnauthenticatedRequestVisiter: public UnversionedRequestVisiter {
 		, _vfs{vfs}
 	{}
 
+protected:
+
+	apsio::Result<SessionStateTransition>
+	handleAuthRequest(styxe::Fid afid, StringView uname, StringView aname, uint32 n_uname) {
+		// Prepare authentication mechanism for a new user idenfied as req.uname who wants to access resource req.aname
+
+		// SEC: Note: do NOT open a new auth file for each auth requiest - as it can lean to DoS
+
+		// TODO(abbyssoul): Even if user name is not valid - but auth is enabled - we should reply with ok, not error
+		auto maybeAuthFile = _unauthenticatedHandler.beginAuthentication(afid, uname, aname, n_uname);
+		if (!maybeAuthFile) {
+			// ???? Internal server error! Close the session
+			responseWriter << styxe::Response::Auth{};
+			return responseOk();
+		}
+
+		auto& authFile = *maybeAuthFile;
+		if (!authFile.isAuthRequired()) {
+			return responseNAK("Auth not required");
+		}
+
+		responseWriter << styxe::Response::Auth{authQid(authFile)};
+		return responseOk();
+	}
+
+
+	apsio::Result<SessionStateTransition>
+	handleAttachRequest(styxe::Fid fid, styxe::Fid afid, StringView uname, StringView aname, uint32 n_uname) {
+		auto user = _unauthenticatedHandler.authenticate(afid, uname, aname, n_uname);
+		if (!user) {  // Authentication failed / incomplete
+			return responseNAK(GenericError::ACCES, "attach");
+		}
+
+		// FIXME(abbyssoul): Current limitation - selecting named trees is not supported
+		if (!aname.empty()) {
+			return responseNAK(GenericError::ACCES, "attach: tree selection not supported");
+		}
+
+		auto const rootId = _vfs.rootId();
+		responseWriter << styxe::Response::Attach{nodeToQid(*_vfs.nodeById(rootId))};
+
+		// NOTE: We are passing literal not aname as hashFid won't copy strings :(
+		return transitTo<SessionProtocolHandler>(*user, _vfs, fid, "", rootId, mv(_unauthenticatedHandler));
+	}
+
+private:
+
 	UnauthenticatedSessionHandler&  _unauthenticatedHandler;
 	kasofs::Vfs&					_vfs;
 };
@@ -400,22 +447,18 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 
 	using UnauthenticatedRequestVisiter::operator();
 
-	auto responseOk() { return responseOkAndTransit(mv(sessionHandler)); }
+	auto responseOk() { return transit(mv(sessionHandler)); }
 	auto responseNAK(StringView message) { return error(mv(sessionHandler), message); }
 	auto responseNAK(Error const& err) { return error(mv(sessionHandler), err); }
 	auto responseNAK(GenericError errCode, StringView message) { return error(mv(sessionHandler), errCode, message); }
 
 	apsio::Result<SessionStateTransition> operator()(styxe::Request::Walk const& req) {
-//		auto maybeUser = sessionHandler.user();
-//		if (!maybeUser)
-//			return responseNAK(GenericError::ACCES, "walk");
-
 		auto const maybeEntry = sessionHandler.entryByFid(req.fid);
 		if (!maybeEntry) {
 			return responseNAK("Not attached fid");
 		}
 
-		// TODO: Make sure newFid is closed
+		// TODO(abbyssoul): Make sure newFid is closed
 		auto const maybeNewFid = sessionHandler.entryByFid(req.newfid);
 		if (maybeNewFid) {
 			return responseNAK("Fid already in use");
@@ -431,7 +474,7 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 		auto& vfs = sessionHandler.vfs();
 		auto& attachmentNode = *maybeEntry;
 
-		// TODO: Support partial Walk response
+		// TODO(abbyssoul): Support partial Walk response
 		// auto pathWriter = responseBuilder << styxe::Response::Partial::Walk
 
 		// FIXME: Protection from a user supplied path length
@@ -555,7 +598,6 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 
 		auto dataWriter = responseWriter << styxe::Response::Partial::Read{};
 
-//		dataWriter.
 		// FIXME: Broken!
 		MutableMemoryView dataDest;
 		auto maybeReader = file.read(dataDest);
@@ -600,17 +642,22 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Create const& )  { return responseNAK("Not supported"); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Remove const& )  { return responseNAK("Not supported"); }
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::WStat const& )   { return responseNAK("Not supported"); }
+	apsio::Result<SessionStateTransition>
+	operator()(styxe::Request::Create const& )  {
+		return responseNAK("Not supported");
+	}
+
+	apsio::Result<SessionStateTransition> operator()(styxe::Request::Remove const& ) {
+		return responseNAK("Not supported");
+	}
+
+	apsio::Result<SessionStateTransition> operator()(styxe::Request::WStat const& )  {
+		return responseNAK("Not supported");
+	}
+
 
 	apsio::Result<std::tuple<kasofs::Entry, kasofs::INode, kasofs::User>>
 	requiresNode(styxe::Fid fid, StringLiteral tag) {
-//		auto maybeUser = sessionHandler.user();
-//		if (!maybeUser) {
-//			return makeError(GenericError::ACCES, tag);
-//		}
-
 		auto maybeEntry = sessionHandler.entryByFid(fid);
 		if (!maybeEntry) {
 			return makeError(GenericError::BADF, tag);
@@ -626,8 +673,8 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 	}
 
 
-	StyxeRequestVisiter(styxe::Tag responseTag, ByteWriter& outputStream, SessionProtocolHandler& handler, kasofs::Vfs& baseVfs)
-		: UnauthenticatedRequestVisiter{responseTag, outputStream, handler, baseVfs}
+	StyxeRequestVisiter(styxe::Tag tag, ByteWriter& outputStream, SessionProtocolHandler& handler, kasofs::Vfs& vfs)
+		: UnauthenticatedRequestVisiter{tag, outputStream, handler, vfs}
 		, sessionHandler{handler}
 	{}
 
@@ -708,7 +755,6 @@ struct MessageTypeNamer {
 
 apsio::Result<styxe::MessageHeader>
 AsyncSessionBase::parseMessageHeader(ByteReader& reader) const {
-//	return std::visit(MessageHeaderHandler{reader},
 	return std::visit([&reader](auto const& handler) { return handler.baseParser.parseMessageHeader(reader); },
 					  _protocolHandler);
 }
@@ -745,127 +791,3 @@ AsyncSessionBase::logHeader(styxe::MessageHeader const& header, char const* dirG
 			<< header.tag
 			<< '\n';
 }
-
-
-
-
-/////
-
-//	apsio::Result<SessionStateResult> operator()(styxe::Request::Version const& req) {
-//		// TODO: Drop current session, close all opened fids, forget the user
-
-//		auto& parser = sessionHandler.baseParser();
-//		const auto minMessageSize = std::min(parser.maxMessageSize(), req.msize);
-
-//		auto result = sessionHandler.setRequestParserVersion(req.version, minMessageSize);
-//		if (!result)
-//			return error(result.getError());
-
-//		parser.maxNegotiatedMessageSize(minMessageSize);
-
-//		StringView negotiatedVersion;
-
-//		// If we can only server sub-version
-//		if (req.version.startsWith(parser.PROTOCOL_VERSION))
-//			negotiatedVersion = parser.PROTOCOL_VERSION;
-//		else if (parser.PROTOCOL_VERSION.startsWith(req.version))
-//			negotiatedVersion = req.version;
-//		else
-//			negotiatedVersion = styxe::kUnknownProtocolVersion;
-
-//		return responseBuilder << styxe::Response::Version{negotiatedVersion, parser.maxNegotiatedMessageSize()};
-//	}
-
-//	apsio::Result<SessionStateResult> operator()(styxe::Request::Auth const& req) {
-//		// TODO: Drop current session, close all opened fids, forget the user
-
-//		auto res = sessionHandler.authHandler().authenticate(req.uname, req.aname);
-//		if (!res) {
-//			return responseBuilder << styxe::Response::Error{res.getError().toString().view()};
-//		}
-
-
-//		// TODO(abbyssoul): Implement auth middlewere
-//		// Use req.afid to associate it with `auth` file, like:
-//		// _openedNodes.emplace(req.fid, *res);
-//		sessionHandler.user(*res);
-
-//		return error("Auth not supported");
-//	}
-
-
-//	apsio::Result<SessionStateResult> operator()(styxe::Request::Attach const& req) {
-//		auto maybeUser = sessionHandler.user();
-//		if (!maybeUser) {  // No authenticated
-//			return error(GenericError::ACCES, "attach");
-//		}
-
-//		auto maybeAttachingUser = sessionHandler.authHandler().lookup(req.uname);
-//		if (!maybeAttachingUser) {
-//			return error(GenericError::ACCES, "attach");
-//		}
-
-//		if (maybeUser != maybeAttachingUser) {
-//			return error(GenericError::ACCES, "attach");
-//		}
-
-//		if (!req.aname.empty()) {
-//			return error("Unexpected tree selected");
-
-//			// TODO: Re-implement:
-////            auto maybePath = Path::parse(req.aname);
-////            if (!maybePath) {
-////                return responseBuilder.error(maybePath.getError());
-////            }
-
-////            auto res = walk(attachementPoint, maybePath.unwrap(), nullptr);
-////            if (!res) {
-////                return responseBuilder.error(res.getError());
-////            }
-
-////            auto& attNode = res.unwrap();
-////            if (!attNode->isWalkable()) {
-////                return responseBuilder.error("File not found");
-////            }
-
-////            auto baseName = maybePath.unwrap().getBasename();
-////            name.assign(baseName.data(), baseName.size());
-////            attachementPoint = std::static_pointer_cast<DirectoryNode>(attNode);
-//		}
-
-//		auto& vfs = sessionHandler.vfs();
-//		auto const& rootId = vfs.rootId();
-//		sessionHandler.hashFid(req.fid, "", rootId);
-
-//		return responseBuilder << styxe::Response::Attach{nodeToQid(*vfs.nodeById(rootId))};
-//	}
-
-
-
-//SessionProtocolHandler::~SessionProtocolHandler() {
-	// Close outstanding files:
-//    if (!_openedNodes.empty()) {
-//        for (auto& node : _openedNodes) {
-//            // TODO: Close nodes
-//        }
-//    }
-//}
-
-
-
-//Result<void, Error>
-//SessionProtocolHandler::handleRequest(styxe::MessageHeader header, ByteReader& payloadStream, ByteWriter& outputStream) {
-//	return _parser.parseRequest(header, payloadStream)
-//		.then([this, header, &outputStream](styxe::RequestMessage&& req) {
-//			auto& response = std::visit(StyxeRequestHandler{{outputStream, header.tag}, *this}, req);
-
-//			logHeader(response.header(), "←");
-////			auto responseHeader = response.header();
-////			std::clog << "← [" << std::setw(5) << responseHeader.messageSize << "] " <<
-////						 responseHeader.type << " " <<
-////						 responseHeader.tag <<
-////						 '\n';
-
-//			return;
-//		});
-//}

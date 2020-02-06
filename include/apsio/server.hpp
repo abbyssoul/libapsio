@@ -29,14 +29,14 @@ struct Server;
  * Active session esteblished and managed by the server.
  */
 struct Session {
-
 	virtual ~Session();
 
 	Session(Server& server, std::shared_ptr<Auth::Policy> authPolicy, struct Observer& observer) noexcept
 		: _server{server}
 		, _authPolicy{Solace::mv(authPolicy)}
 		, _observer{observer}
-	{}
+	{
+	}
 
 	Server&	server() noexcept { return _server; }
 
@@ -55,17 +55,38 @@ protected:
 };
 
 
+/**
+ * Session stream observer interface.
+ * Lifetime note: It is users responsibility to make sure that instance of the observer
+ * passed to server lives at least as long as the server
+ */
 struct Observer {
 	virtual ~Observer();
 
+	/**
+	 * Event handler: A new session has been created by a listener.
+	 * Is expected that observe will store this session as it will be destroyed otherwise.
+	 * @param listenerInterface Dialstring passed to the listener to identify listener interface.
+	 * @param newSession An newly created session.
+	 */
 	virtual void onSessionAccepted(styxe::DialString listenerInterface, std::shared_ptr<Session> newSession) = 0;
 
-	// Connection listeners signals:
-	virtual void onAcceptFailed(styxe::DialString listenerInterface, Error error) = 0;
+	/**
+	 * Event hadler: An error occured when attempting to accept a new session.
+	 * @param listenerInterface Dialstring passed to the listener to identify listener interface.
+	 * @param error Error details.
+	 */
+	virtual void onError(styxe::DialString listenerInterface, Error error) = 0;
 
-	virtual void onSessionTerminated(Session* session) = 0;
+	/**
+	 * Terminate has been called on a session object and no read operations will be scheduler for it.
+	 * @param session Session object being terminated. If observer saved a reference to the session -
+	 * this is a good opportunity to drop this reference.
+	 */
+	virtual void onSessionTerminated(std::shared_ptr<Session> session) = 0;
 
 };
+
 
 /**
  * Server is IPC handler that recieve request and spawns a session with appropriate protocol
@@ -96,14 +117,14 @@ struct Server {
 	 * Spawns new session on successful connection.
 	 */
 	struct ConnectionListener {
-
 		virtual ~ConnectionListener();
 
 		ConnectionListener(Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer) noexcept
 			: _server{server}
 			, _authPolicy{Solace::mv(authPolicy)}
 			, _observer{observer}
-		{}
+		{
+		}
 
 		Server&	server() noexcept { return _server; }
 
@@ -157,7 +178,6 @@ public:
 	listen(styxe::DialString endpoint, Config&& config, Observer& sessionObserver);
 
 
-
 private:
 
 	/// IO context used for async operations
@@ -166,38 +186,6 @@ private:
 	Solace::MemoryManager&		_memManager;
 	/// Resource served by the server instance.
 	kasofs::Vfs&				_vfs;
-};
-
-
-struct SimpleServer final :
-		public Server,
-		public Observer
-{
-	SimpleServer(asio::io_context& iocontext, kasofs::Vfs& vfs, Solace::MemoryManager& memManager) noexcept
-		: Server{iocontext, vfs, memManager}
-	{}
-
-
-	// Connection listeners signals:
-	void onAcceptFailed(styxe::DialString endpoint, Error error) override;
-
-	void onSessionAccepted(styxe::DialString endpoint, std::shared_ptr<Session> newSession) override;
-	void onSessionTerminated(Session* session) override;
-
-
-	/**
-	 * Begin listening for incomming connections using given configuration
-	 * @param endpoint Endpoint to listen on for connections.
-	 * @param config Options for listening
-	 * @return A new state of the server
-	 */
-	Result<std::shared_ptr<ConnectionListener>>
-	listen(styxe::DialString endpoint, Config&& config) {
-		return Server::listen(endpoint, Solace::mv(config), *this);
-	}
-
-private:
-	std::vector<std::shared_ptr<Session>> _sessions;
 };
 
 }  // end of namespace apsio

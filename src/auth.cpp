@@ -30,14 +30,18 @@ namespace  {
 Optional<kasofs::User>
 lookup(StringView uname) {
 	char uNameBuffer[256];
+	char pwdBuffer[256];
 	strncpy(uNameBuffer, uname.data(), std::min<size_t>(sizeof(uNameBuffer), uname.size()));
 
-	passwd const* pass = getpwnam(uNameBuffer);
-	if (!pass) {
-		return none;
-	}
+	passwd pass;
+	passwd* result;
+	if (getpwnam_r(uNameBuffer, &pass, pwdBuffer, sizeof (pwdBuffer), &result) != 0)
+		return none;  // Error retrieving record. Probably buffer too small :(
 
-	return kasofs::User{pass->pw_uid, pass->pw_gid};
+	if (result != &pass)
+		return none;  // Could not find an entry
+
+	return kasofs::User{result->pw_uid, result->pw_gid};
 }
 
 }  // namespace
@@ -59,7 +63,7 @@ Auth::Strategy::authenticate(StringView uname, StringView SOLACE_UNUSED(resource
 		return makeError(GenericError::PERM, "auth");
 	}
 
-	// TODO: Establish auth FID for aname
+	// TODO(abbyssoul): Establish auth FID for aname
 
 	return Ok(*maybeUser);
 }
@@ -67,18 +71,11 @@ Auth::Strategy::authenticate(StringView uname, StringView SOLACE_UNUSED(resource
 
 Auth::Strategy&
 Auth::Policy::findAuthStrategyFor(Match userReq) const noexcept {
-	auto b = std::begin(_authPolicies);
-	auto e = std::end(_authPolicies);
-
-	auto const size = _authPolicies.size();
-	if (b == e)
-		return kDenyAll;
-
-	auto it = std::find_if(b, e, [userReq](Auth::Policy::ACL const& acl) {
+	auto it = std::find_if(std::begin(_authPolicies), std::end(_authPolicies), [userReq](Auth::Policy::ACL const& acl) {
 		return acl.match.matches(userReq);
 	});
 
-	if (it == e) {
+	if (it == std::end(_authPolicies)) {
 		return kDenyAll;
 	}
 

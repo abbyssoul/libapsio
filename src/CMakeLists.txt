@@ -1,11 +1,12 @@
 
 set(SOURCE_FILES
-    server.cpp
+    systemErrorDomain.cpp
     auth.cpp
     authFile.cpp
     asyncConnectionListener.cpp
     asyncServerSession.cpp
-    systemErrorDomain.cpp
+    server.cpp
+    simpleServer.cpp
     )
 
 

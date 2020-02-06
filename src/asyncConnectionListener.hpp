@@ -22,12 +22,11 @@ struct AsyncServerBase :
 		public Server::ConnectionListener,
 		public std::enable_shared_from_this<AsyncServerBase>
 {
-
 	AsyncServerBase(Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer) noexcept
 		: Server::ConnectionListener{server, Solace::mv(authPolicy), observer}
 	{}
 
-	virtual Result<void> terminate() override = 0;
+	Result<void> terminate() override;
 
 	virtual Result<void> listen(styxe::DialString ds) = 0;
 };
@@ -35,8 +34,12 @@ struct AsyncServerBase :
 
 namespace impl {
 
-Solace::Result<void, asio::error_code> startAcceptor(asio::local::stream_protocol::acceptor& acceptor, styxe::DialString const& config);
-Solace::Result<void, asio::error_code> startAcceptor(asio::ip::tcp::acceptor& acceptor, styxe::DialString const& config);
+Solace::Result<void, asio::error_code>
+startAcceptor(asio::local::stream_protocol::acceptor& acceptor, styxe::DialString const& config);
+
+Solace::Result<void, asio::error_code>
+startAcceptor(asio::ip::tcp::acceptor& acceptor, styxe::DialString const& config);
+
 
 /**
  * @brief A server that listen on a local socket.
@@ -63,12 +66,6 @@ struct AsyncServer final :
 	listen(styxe::DialString ds) override {
 		auto startResult = startAcceptor(_acceptor, ds);
 		if (!startResult) {
-			//	char buff[16];
-			//	atomToString(ds.protocol, buff);
-			//	std::cerr << "Can't start to listen using un-suppoted protocol: '" << buff << "'\n";
-
-			//	return makeError(Solace::BasicError::InvalidInput, "listen: protocol");
-
 			return fromAsioError(startResult.getError());
 		}
 
@@ -95,16 +92,16 @@ protected:
 	void doAccept() {
 		_acceptor.async_accept([self = shared_from_this(), this] (asio::error_code const& ec, Socket&& peer) {
 			if (ec) {
-				observer().onAcceptFailed(_boundTo, fromAsioError(ec));
+				observer().onError(_boundTo, fromAsioError(ec));
 				return;
 			}
 
-			auto maybeSession = spawnSession<ProtocolType>(Solace::mv(peer), server(), authPolicy(), observer(), _config);
-			if (!maybeSession) {
-				observer().onAcceptFailed(_boundTo, maybeSession.getError());
+			auto session = spawnSession<ProtocolType>(Solace::mv(peer), server(), authPolicy(), observer(), _config);
+			if (!session) {
+				observer().onError(_boundTo, session.getError());
 			} else {
-				(*maybeSession)->start();
-				observer().onSessionAccepted(_boundTo, maybeSession.moveResult());
+				(*session)->start();
+				observer().onSessionAccepted(_boundTo, session.moveResult());
 			}
 
 			doAccept();
@@ -127,7 +124,7 @@ private:
 template<typename Protocol>
 std::shared_ptr<AsyncServerBase>
 makeListener(Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer, Server::BaseConfig config) {
-	// TODO: Should we use memory manager to allocate listener too?
+	// TODO(abbyssoul): Should we use memory manager to allocate listener too?
 	return std::make_shared<impl::AsyncServer<Protocol>>(server, Solace::mv(authPolicy), observer, config);
 }
 
@@ -135,6 +132,7 @@ makeListener(Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer&
  * Create a new instance of a connection acceptor for a given protocol.
  * @param protocol Protocol to create an acceptor for.
  * @param server IO object
+ * @param observer Session lifecycle observer
  * @param config Listener configuration
  * @return
  */
@@ -145,4 +143,4 @@ createServer(Solace::AtomValue protocol,
 			 Server::Config&& config);
 
 }  // namespace apsio
-#endif // APSIO_ASYNCCONNECTIONLISTENER_HPP
+#endif  // APSIO_ASYNCCONNECTIONLISTENER_HPP

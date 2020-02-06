@@ -64,7 +64,9 @@ static_assert(std::is_move_constructible_v<UnversionedSessionHandler>);
  */
 struct UnauthenticatedSessionHandler : public UnversionedSessionHandler {
 
-	UnauthenticatedSessionHandler(styxe::RequestParser&& parser, std::shared_ptr<Auth::Policy> auth, UnversionedSessionHandler&& baseHandler) noexcept
+	UnauthenticatedSessionHandler(styxe::RequestParser&& parser,
+								  std::shared_ptr<Auth::Policy> auth,
+								  UnversionedSessionHandler&& baseHandler) noexcept
 		: UnversionedSessionHandler{Solace::mv(baseHandler)}
 		, _parser{Solace::mv(parser)}
 		, _authPolicy{Solace::mv(auth)}
@@ -73,8 +75,14 @@ struct UnauthenticatedSessionHandler : public UnversionedSessionHandler {
 	styxe::RequestParser&			parser() noexcept		{ return _parser; }
 	std::shared_ptr<Auth::Policy>	authPolicy() noexcept	{ return _authPolicy; }
 
-	Result<AuthFile&>		beginAuthentication(styxe::Fid afid, Solace::StringView uname, Solace::StringView resource);
-	Result<kasofs::User>	authenticate(styxe::Fid afid, Solace::StringView name, Solace::StringView resource);
+	Result<AuthFile&>		beginAuthentication(styxe::Fid afid,
+												Solace::StringView uname,
+												Solace::StringView resource,
+												Solace::uint32 n_uname);
+	Result<kasofs::User>	authenticate(styxe::Fid afid,
+										 Solace::StringView name,
+										 Solace::StringView resource,
+										 Solace::uint32 n_uname);
 	Result<AuthFile&>		findAuthForFid(styxe::Fid fid);
 
 
@@ -86,7 +94,7 @@ struct UnauthenticatedSessionHandler : public UnversionedSessionHandler {
 };
 
 // UnauthenticatedSessionHandler type requirements
-static_assert(std::is_move_assignable_v<UnauthenticatedSessionHandler>, "UnauthenticatedSessionHandler should be movable");
+static_assert(std::is_move_assignable_v<UnauthenticatedSessionHandler>);
 static_assert(std::is_move_constructible_v<UnauthenticatedSessionHandler>);
 
 
@@ -97,11 +105,15 @@ struct SessionProtocolHandler final : public UnauthenticatedSessionHandler {
 	using size_type = styxe::size_type;
 
 
-	SessionProtocolHandler(kasofs::User user, kasofs::Vfs& vfs, UnauthenticatedSessionHandler&& handler) noexcept
+	SessionProtocolHandler(kasofs::User user, kasofs::Vfs& vfs,
+						   styxe::Fid fid, Solace::StringView aname, kasofs::INode::Id id,
+
+						   UnauthenticatedSessionHandler&& handler) noexcept
 		: UnauthenticatedSessionHandler{Solace::mv(handler)}
 		, _vfs{vfs}
 		, _user{user}
 	{
+		hashFid(fid, aname, id);
 	}
 
 	kasofs::Vfs& vfs() noexcept							{ return _vfs; }
@@ -169,7 +181,12 @@ struct AsyncSessionBase :
 		public std::enable_shared_from_this<AsyncSessionBase>
 {
 
-	AsyncSessionBase(Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer, Server::BaseConfig config, Solace::MemoryResource&& inBuffer, Solace::MemoryResource&& outBuffer) noexcept
+	AsyncSessionBase(Server& server,
+					 std::shared_ptr<Auth::Policy> authPolicy,
+					 Observer& observer,
+					 Server::BaseConfig config,
+					 Solace::MemoryResource&& inBuffer,
+					 Solace::MemoryResource&& outBuffer) noexcept
 		: Session{server, Solace::mv(authPolicy), observer}
 		, _protocolHandler{UnversionedSessionHandler(config.maxMessageSize)}
 		, _requestBuffer{Solace::mv(inBuffer)}
@@ -177,7 +194,7 @@ struct AsyncSessionBase :
 	{
 	}
 
-	virtual Result<void> terminate() override = 0;
+	Result<void> terminate() override = 0;
 
 	void logError(asio::error_code const& ec) const;
 	void logError(Error const& ec) const;
@@ -201,9 +218,6 @@ protected:
 
 protected:
 
-	/// Max size in bytes of a message.
-//	Solace::uint16			_maxMessageSize;
-
 	/// State of the session:
 	SessionHandler			_protocolHandler;
 
@@ -218,17 +232,23 @@ protected:
 
 
 template<typename ProtocolType>
-class AyncSession final :
+class AsyncSession final :
 		public AsyncSessionBase
 {
 public:
 	using Endpoint = typename ProtocolType::endpoint;
 	using Socket = typename ProtocolType::socket;
 
-	AyncSession(AyncSession const&) = delete;
-	AyncSession& operator= (AyncSession const&) = delete;
+	AsyncSession(AsyncSession const&) = delete;
+	AsyncSession& operator= (AsyncSession const&) = delete;
 
-	AyncSession(Socket&& channel, Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer, Server::BaseConfig config, Solace::MemoryResource&& in, Solace::MemoryResource&& out)
+	AsyncSession(Socket&& channel,
+				Server& server,
+				std::shared_ptr<Auth::Policy> authPolicy,
+				Observer& observer,
+				Server::BaseConfig config,
+				Solace::MemoryResource&& in,
+				Solace::MemoryResource&& out)
 		: AsyncSessionBase{server, Solace::mv(authPolicy), observer, config, Solace::mv(in), Solace::mv(out)}
 		, _channel{Solace::mv(channel)}
 		, _remoteEndpoint{_channel.remote_endpoint()}
@@ -237,7 +257,7 @@ public:
 
 
 	Result<void> terminate() override {
-		observer().onSessionTerminated(this);
+		notifyObserver();
 
 		asio::error_code ec;
 		_channel.close(ec);
@@ -245,13 +265,6 @@ public:
 			return fromAsioError(ec);
 		}
 
-//		if (_channel.is_open()) {
-//		}
-
-		// TODO: Implement session removal from the 'state'/vfs
-//        _pAppState->clients.erase(std::remove_if(_pAppState->clients.begin(), _pAppState->clients.end(),
-//                                                 [this](auto const& c) { return (c.session.get() == this);}),
-//                                  _pAppState->clients.end());
 		return Solace::Ok();
 	}
 
@@ -260,6 +273,13 @@ public:
 	}
 
 protected:
+
+	void notifyObserver() {
+		if (!_isTerminated) {
+			_isTerminated = true;
+			observer().onSessionTerminated(shared_from_this());
+		}
+	}
 
 	void terminate(Error const& ec) {
 		logError(ec);
@@ -319,7 +339,7 @@ protected:
 						return;
 					}
 
-					// TODO: Do we handle partial writes?
+					// TODO(abbyssoul): Do we handle partial writes?
 					// responseData.advance(bytesWriten)
 					// while (responseData.hasRemaining()) {...}
 					doRead();
@@ -328,14 +348,27 @@ protected:
 
 private:
 	Socket      _channel;
-	Endpoint    _remoteEndpoint;    // Remote peer endpoint. We save it to use for logging as it may be not avaliable in some cases.
+	Endpoint    _remoteEndpoint;    // Remote peer endpoint. Save for logging as it may be not avaliable in some cases.
+	bool		_isTerminated{false};
 };
 
 
 template<typename Protocol>
 std::shared_ptr<AsyncSessionBase>
-makeSession(typename Protocol::socket&& channel, Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer, Server::BaseConfig config, Solace::MemoryResource&& inBuf, Solace::MemoryResource&& outBuf) {
-	return std::make_shared<AyncSession<Protocol>>(Solace::mv(channel), server, authPolicy, observer, config, Solace::mv(inBuf), Solace::mv(outBuf));
+makeSession(typename Protocol::socket&& channel,
+			Server& server,
+			std::shared_ptr<Auth::Policy> authPolicy,
+			Observer& observer,
+			Server::BaseConfig config,
+			Solace::MemoryResource&& inBuf,
+			Solace::MemoryResource&& outBuf) {
+	return std::make_shared<AsyncSession<Protocol>>(Solace::mv(channel),
+												   server,
+												   authPolicy,
+												   observer,
+												   config,
+												   Solace::mv(inBuf),
+												   Solace::mv(outBuf));
 }
 
 }  // namespace impl
@@ -344,11 +377,16 @@ makeSession(typename Protocol::socket&& channel, Server& server, std::shared_ptr
 
 template<typename Protocol>
 Result<std::shared_ptr<impl::AsyncSessionBase>>
-spawnSession(typename Protocol::socket&& channel, Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer& observer, Server::BaseConfig config) {
+spawnSession(typename Protocol::socket&& channel,
+			 Server& server,
+			 std::shared_ptr<Auth::Policy> authPolicy,
+			 Observer& observer,
+			 Server::BaseConfig config)
+{
 	logConnection(channel);
 
 	auto& memoryManager = server.memoryManager();
-	// TODO: Review memory allocation strategy used
+	// TODO(abbyssoul): Review memory allocation strategy used
 	auto inBuf  = memoryManager.allocate(config.maxMessageSize);
 	auto outBuf = memoryManager.allocate(config.maxMessageSize);
 	if (!inBuf)
@@ -357,9 +395,13 @@ spawnSession(typename Protocol::socket&& channel, Server& server, std::shared_pt
 		return outBuf.moveError();
 
 	// TODO(abbyssoul): Can we avoid memory allocation here and re-use / garbege collect memory?
-	return impl::makeSession<Protocol>(Solace::mv(channel), server, authPolicy, observer, config, inBuf.moveResult(), outBuf.moveResult());
-//    session->start();
-//	return Solace::mv(session);
+	return impl::makeSession<Protocol>(Solace::mv(channel),
+									   server,
+									   authPolicy,
+									   observer,
+									   config,
+									   inBuf.moveResult(),
+									   outBuf.moveResult());
 }
 
 

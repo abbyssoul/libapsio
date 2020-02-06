@@ -1,5 +1,13 @@
-#ifndef ASIO_UTILS_HPP
-#define ASIO_UTILS_HPP
+/*
+*  Copyright (C) Ivan Ryabov - All Rights Reserved
+*
+*  Unauthorized copying of this file, via any medium is strictly prohibited.
+*  Proprietary and confidential.
+*
+*  Written by Ivan Ryabov <abbyssoul@gmail.com>
+*/
+#ifndef SRC_ASIO_UTILS_HPP_
+#define SRC_ASIO_UTILS_HPP_
 
 #include <solace/memoryResource.hpp>
 
@@ -32,4 +40,4 @@ fromAsioError(asio::error_code const& ec) noexcept {
 	return apsio::impl::makeSystemError(ec);
 }
 
-#endif // ASIO_UTILS_HPP
+#endif  // SRC_ASIO_UTILS_HPP_

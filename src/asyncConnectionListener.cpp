@@ -16,6 +16,8 @@ using namespace Solace;
 using namespace styxe;
 
 
+apsio::Result<void> apsio::AsyncServerBase::terminate() { return Ok(); }
+
 
 Result<void, asio::error_code>
 apsio::impl::startAcceptor(asio::local::stream_protocol::acceptor& acceptor, DialString const& ds) {
@@ -31,13 +33,12 @@ apsio::impl::startAcceptor(asio::local::stream_protocol::acceptor& acceptor, Dia
 	// Unlink before bind
 	if (unlink(localEndpoint.path().c_str())) {
 		if (errno != ENOENT) {
-			return std::make_error_code(static_cast<std::errc>(errno)); //makeErrno("unlink"));
+			return std::make_error_code(static_cast<std::errc>(errno));
 		}
 	}
 
 	acceptor.bind(localEndpoint, ec);
 	if (ec) {
-//		std::cerr << "Failed to bind a local socket name: '" << ds.address << '\'' << std::endl;
 		return ec;
 	}
 
@@ -59,6 +60,7 @@ apsio::impl::startAcceptor(asio::ip::tcp::acceptor& acceptor, DialString const& 
 	if (ec) {
 		return ec;
 	}
+
 	// FIXME: Use uint16 parser to catch uint16 overflow
 	uint16 const port = std::strtoul(ds.service.data(), nullptr, 10);
 	auto localEndpoint = asio::ip::tcp::endpoint{localAddress, port};
@@ -85,13 +87,20 @@ apsio::impl::startAcceptor(asio::ip::tcp::acceptor& acceptor, DialString const& 
 apsio::Result<std::shared_ptr<apsio::AsyncServerBase>>
 apsio::createServer(AtomValue protocol, Server& server, Observer& observer, Server::Config&& config) {
 #ifdef ASIO_HAS_LOCAL_SOCKETS
-	if (styxe::kProtocolUnix == protocol) return makeListener<asio::local::stream_protocol>(server, std::make_shared<Auth::Policy>(mv(config.authPolicy)), observer, config);
+	if (styxe::kProtocolUnix == protocol) {
+		return makeListener<asio::local::stream_protocol>(server,
+														  std::make_shared<Auth::Policy>(mv(config.authPolicy)),
+														  observer,
+														  config);
+	}
 #endif
-	if (styxe::kProtocolTCP == protocol) return makeListener<asio::ip::tcp>(server, std::make_shared<Auth::Policy>(mv(config.authPolicy)), observer, config);
+	if (styxe::kProtocolTCP == protocol) {
+		return makeListener<asio::ip::tcp>(server,
+										   std::make_shared<Auth::Policy>(mv(config.authPolicy)),
+										   observer,
+										   config);
+	}
 
-	//	char buff[16];
-	//	atomToString(ds.protocol, buff);
-	//	std::cerr << "Can't start to listen using un-suppoted protocol: '" << buff << "'\n";
 	return makeError(GenericError::IO, "listen: not supported protocol");
 }
 

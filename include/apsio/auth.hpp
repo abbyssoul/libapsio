@@ -24,7 +24,7 @@ namespace Auth {
 /// Aux structure to represent ACL entry: who can access what
 struct Match {
 	Solace::StringView uname{};		/// Who has access to a resource.
-	Solace::StringView resource{};	/// What resource access is required to.
+	Solace::StringView resource{};  /// What resource access is required to.
 
 	bool matches(Match other) const noexcept;
 };
@@ -71,7 +71,7 @@ struct Policy {
 	 */
 	Strategy& findAuthStrategyFor(Match match) const noexcept;
 
-//protected:
+protected:
 
 	Solace::Array<ACL>	_authPolicies{};
 };

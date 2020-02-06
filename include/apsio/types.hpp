@@ -21,4 +21,4 @@ template<typename T>
 using Result = Solace::Result<T, Error>;
 
 }  // end of namespace apsio
-#endif // APSIO_TYPES_HPP
+#endif  // APSIO_TYPES_HPP
