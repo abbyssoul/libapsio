@@ -1,10 +1,17 @@
 /*
-*  Copyright (C) Ivan Ryabov - All Rights Reserved
+*  Copyright (C) 2020 Ivan Ryabov
 *
-*  Unauthorized copying of this file, via any medium is strictly prohibited.
-*  Proprietary and confidential.
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
 *
-*  Written by Ivan Ryabov <abbyssoul@gmail.com>
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
 */
 #pragma once
 #ifndef APSIO_AUTH_HPP
@@ -45,12 +52,16 @@ struct Strategy {
 	/**
 	 * Attempt to authenticate a user given user name, resource and opaque auth-strategy specific data
 	 * @param uname User name to authenticate
+	 * @param uid Optional User ID to authenticate as.
 	 * @param resource Resource access required to.
 	 * @param data Authentication mechanism specific data.
 	 * @return Authentiocation result: A user object or an error.
 	 */
 	Result<kasofs::User>
-	virtual authenticate(Solace::StringView uname, Solace::StringView resource, Solace::MemoryView data);
+	virtual authenticate(Solace::StringView uname,
+						 Solace::Optional<Solace::uint32> uid,
+						 Solace::StringView resource,
+						 Solace::MemoryView data);
 };
 
 
@@ -63,6 +74,13 @@ struct Policy {
 		Match						match{};
 		std::unique_ptr<Strategy>	strategy{};
 	};
+
+	Policy() noexcept
+	{}
+
+	Policy(Solace::Array<ACL>&& policies) noexcept
+		: _authPolicies{Solace::mv(policies)}
+	{}
 
 	/**
 	 * Select authentication strategy for a given user / resource combination.

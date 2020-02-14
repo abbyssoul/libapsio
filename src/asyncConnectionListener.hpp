@@ -1,14 +1,21 @@
 /*
-*  Copyright (C) Ivan Ryabov - All Rights Reserved
+*  Copyright (C) 2020 Ivan Ryabov
 *
-*  Unauthorized copying of this file, via any medium is strictly prohibited.
-*  Proprietary and confidential.
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
 *
-*  Written by Ivan Ryabov <abbyssoul@gmail.com>
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
 */
 #pragma once
-#ifndef APSIO_ASYNCCONNECTIONLISTENER_HPP
-#define APSIO_ASYNCCONNECTIONLISTENER_HPP
+#ifndef APSIO_SRC_ASYNCCONNECTIONLISTENER_HPP
+#define APSIO_SRC_ASYNCCONNECTIONLISTENER_HPP
 
 
 #include "asyncServerSession.hpp"
@@ -129,12 +136,12 @@ makeListener(Server& server, std::shared_ptr<Auth::Policy> authPolicy, Observer&
 }
 
 /**
- * Create a new instance of a connection acceptor for a given protocol.
- * @param protocol Protocol to create an acceptor for.
+ * Create a new instance of a connection listener for a given protocol.
+ * @param protocol Protocol to create a listener for.
  * @param server IO object
  * @param observer Session lifecycle observer
  * @param config Listener configuration
- * @return
+ * @return A resulting listener or an error.
  */
 Result<std::shared_ptr<AsyncServerBase>>
 createServer(Solace::AtomValue protocol,
@@ -143,4 +150,4 @@ createServer(Solace::AtomValue protocol,
 			 Server::Config&& config);
 
 }  // namespace apsio
-#endif  // APSIO_ASYNCCONNECTIONLISTENER_HPP
+#endif  // APSIO_SRC_ASYNCCONNECTIONLISTENER_HPP

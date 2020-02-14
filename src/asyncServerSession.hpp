@@ -1,14 +1,21 @@
 /*
-*  Copyright (C) Ivan Ryabov - All Rights Reserved
+*  Copyright (C) 2020 Ivan Ryabov
 *
-*  Unauthorized copying of this file, via any medium is strictly prohibited.
-*  Proprietary and confidential.
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
 *
-*  Written by Ivan Ryabov <abbyssoul@gmail.com>
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
 */
 #pragma once
-#ifndef APSIO_ASYNCSERVERSESSION_HPP
-#define APSIO_ASYNCSERVERSESSION_HPP
+#ifndef APSIO_SRC_ASYNCSERVERSESSION_HPP
+#define APSIO_SRC_ASYNCSERVERSESSION_HPP
 
 #include "asio_utils.hpp"
 #include "apsio/server.hpp"
@@ -75,14 +82,15 @@ struct UnauthenticatedSessionHandler : public UnversionedSessionHandler {
 	styxe::RequestParser&			parser() noexcept		{ return _parser; }
 	std::shared_ptr<Auth::Policy>	authPolicy() noexcept	{ return _authPolicy; }
 
-	Result<AuthFile&>		beginAuthentication(styxe::Fid afid,
-												Solace::StringView uname,
-												Solace::StringView resource,
-												Solace::uint32 n_uname);
+	Auth::Strategy&			findAuthStrategy(Solace::StringView uname,
+											 Solace::Optional<Solace::uint32> uid,
+											 Solace::StringView resource);
 	Result<kasofs::User>	authenticate(styxe::Fid afid,
 										 Solace::StringView name,
-										 Solace::StringView resource,
-										 Solace::uint32 n_uname);
+										 Solace::Optional<Solace::uint32> uid,
+										 Solace::StringView resource);
+
+	styxe::Qid beginAuth(styxe::Fid fid, AuthFile&& file);
 	Result<AuthFile&>		findAuthForFid(styxe::Fid fid);
 
 
@@ -134,17 +142,27 @@ struct SessionProtocolHandler final : public UnauthenticatedSessionHandler {
 
 	Solace::Optional<kasofs::Entry>
 	entryByFid(styxe::Fid fid) const noexcept {
-		auto nodeIt = _fidToEntry.find(fid);
-		if (nodeIt == _fidToEntry.end()) {
+		auto it = _fidToEntry.find(fid);
+		if (it == _fidToEntry.end()) {
 			return Solace::none;
 		}
 
-		return {nodeIt->second};
+		return {it->second};
 	}
 
 
 	auto addOpened(styxe::Fid fid, kasofs::File&& file) {
 		return _openedNodes.emplace(fid, Solace::mv(file)).first;
+	}
+
+	Solace::Optional<kasofs::File*>
+	findOpened(styxe::Fid fid) {
+		auto it = _openedNodes.find(fid);
+		if (it == _openedNodes.end()) {
+			return Solace::none;
+		}
+
+		return { &(it->second) };
 	}
 
 	void removeOpened(styxe::Fid fid) {
@@ -188,7 +206,7 @@ struct AsyncSessionBase :
 					 Solace::MemoryResource&& inBuffer,
 					 Solace::MemoryResource&& outBuffer) noexcept
 		: Session{server, Solace::mv(authPolicy), observer}
-		, _protocolHandler{UnversionedSessionHandler(config.maxMessageSize)}
+		, _protocolHandler{UnversionedSessionHandler(config.maxMessageSize - styxe::headerSize())}
 		, _requestBuffer{Solace::mv(inBuffer)}
 		, _responseBuffer{Solace::mv(outBuffer)}
 	{
@@ -293,7 +311,7 @@ protected:
 
 	void doRead() {
 		asio::async_read(_channel, asio_buffer(Solace::wrapMemory(_headerStorage)),  // read fixed-size message header
-				[self = shared_from_this(), this](asio::error_code const& ec, std::size_t bytesRead) {
+				[self = shared_from_this(), this] (asio::error_code const& ec, std::size_t bytesRead) {
 					if (ec) {  // Error, don't schedule more comms. drop session.
 						terminate(ec);
 						return;
@@ -312,7 +330,7 @@ protected:
 
 	void readPayload(styxe::MessageHeader header) {
 		asio::async_read(_channel, asio_buffer(_requestBuffer.view().slice(0, header.payloadSize())),
-			[self = shared_from_this(), this, header](asio::error_code const& ec, std::size_t bytesRead) {
+			[self = shared_from_this(), this, header] (asio::error_code const& ec, std::size_t bytesRead) {
 				if (ec) {  // Error, don't schedule more comms. drop session.
 					terminate(ec);
 					return;
@@ -406,4 +424,4 @@ spawnSession(typename Protocol::socket&& channel,
 
 
 }  // namespace apsio
-#endif  // APSIO_ASYNCSERVERSESSION_HPP
+#endif  // APSIO_SRC_ASYNCSERVERSESSION_HPP

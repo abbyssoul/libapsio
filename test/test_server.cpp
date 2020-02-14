@@ -103,5 +103,5 @@ TEST_F(TestServer, emptyAuthPolicyDenyAll) {
 
 	auto& policy = listener->authPolicy()->findAuthStrategyFor({"user", "somewhere"});
 	EXPECT_TRUE(policy.isRequired);
-	EXPECT_TRUE(policy.authenticate("user", "somewhere", MemoryView{}).isError());
+	EXPECT_TRUE(policy.authenticate("user", none, "somewhere", MemoryView{}).isError());
 }

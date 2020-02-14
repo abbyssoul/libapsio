@@ -1,10 +1,17 @@
 /*
-*  Copyright (C) Ivan Ryabov - All Rights Reserved
+*  Copyright (C) 2020 Ivan Ryabov
 *
-*  Unauthorized copying of this file, via any medium is strictly prohibited.
-*  Proprietary and confidential.
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
 *
-*  Written by Ivan Ryabov <abbyssoul@gmail.com>
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
 */
 #include "asyncServerSession.hpp"
 
@@ -56,8 +63,8 @@ modeToOp(styxe::OpenMode mode) {
 
 
 styxe::QidType
-mapType(kasofs::VfsId nodeType) noexcept {
-	if (nodeType == kasofs::Vfs::kVfsTypeDirectory) {
+mapType(kasofs::INode const& inode) noexcept {
+	if (kasofs::isDirectory(inode)) {
 		return styxe::QidType::DIR;
 	}
 
@@ -70,10 +77,29 @@ nodeToQid(kasofs::INode const& inode) noexcept {
 	return styxe::Qid {
 		inode.vfsData,
 		inode.version,
-		static_cast<byte>(mapType(inode.fsTypeId))
+		static_cast<byte>(mapType(inode))
 	};
 }
 
+
+uint32
+kasofsPermissionsTo9pMode(kasofs::INode const& inode) noexcept {
+	uint32 mode = inode.permissions.value & 0777;
+
+	if (kasofs::isDirectory(inode)) {
+		mode |= static_cast<uint32>(styxe::DirMode::DIR);
+		if (inode.permissions.user().can(kasofs::Permissions::READ)) { mode |= 0100; }
+		if (inode.permissions.group().can(kasofs::Permissions::READ)) { mode |= 0010; }
+		if (inode.permissions.others().can(kasofs::Permissions::READ)) { mode |= 0001; }
+	}
+
+	// TODO(abbyssoul): Set .u extended attributes
+
+	// stats.mode = 0666;  // inode.permissions.value;
+	//	| static_cast<uint32>(styxe::DirMode::READ) | static_cast<uint32>(styxe::DirMode::WRITE);
+
+	return mode;
+}
 
 styxe::Qid
 authQid(AuthFile const& SOLACE_UNUSED(strategy)) noexcept {
@@ -82,19 +108,29 @@ authQid(AuthFile const& SOLACE_UNUSED(strategy)) noexcept {
 
 
 styxe::Stat
-nodeStats(StringView name, kasofs::INode const& inode) {
+nodeStats(kasofs::Vfs const& vfs, kasofs::Entry entry, kasofs::INode const& inode) {
 	styxe::Stat stats;
 
 	stats.qid = nodeToQid(inode);
-	stats.name = name;
-	stats.mode = inode.permissions.value;
+	stats.type = inode.fsTypeId;       //!< server type (for kernel use)
+	stats.dev = inode.nodeTypeId;        //!< server subtype (for kernel use)
+	stats.mode = kasofsPermissionsTo9pMode(inode);
 	stats.atime = inode.atime;
 	stats.mtime = inode.mtime;
 	stats.length = inode.dataSize;
 
-//    stats.uid;        //!< owner name
-//    stats.gid;        //!< group name
-//    stats.muid;       //!< name of the user who last modified the file
+	// FIX root name:
+	stats.name = (entry.nodeId == vfs.rootId())
+			? StringLiteral{"/"}
+			: entry.name;
+
+	stats.uid = StringLiteral{"soultaker"};
+	stats.gid = StringLiteral{"soultaker"};
+	/*
+	stats.uid = inode.owner.uid;        //!< owner name
+	stats.gid = inode.owner.gid;        //!< group name
+	stats.muid = inode.owner.uid;       //!< name of the user who last modified the file
+	*/
 
 	// Size the stats struct
 	stats.size = styxe::DirListingWriter::sizeStat(stats);
@@ -130,34 +166,63 @@ struct SessionStateTransition {
 };
 
 
+using MaybeTransition = apsio::Result<SessionStateTransition>;
+
 apsio::Result<SessionStateTransition>
 unsupportedMessage() /*noexcept */{
 	return makeError(GenericError::PERM, "unsupported");
 }
 
 
+apsio::Result<AuthFile>
+make_auth(StringView uname, Optional<uint32> uid, StringView resource, Auth::Strategy& strategy) {
+
+	auto maybeName = makeString(uname);
+	if (!maybeName)
+		return maybeName.moveError();
+
+	auto maybeResource = makeString(resource);
+	if (!maybeResource)
+		return maybeResource.moveError();
+
+	return apsio::Result<AuthFile>{types::okTag, in_place,
+				maybeName.moveResult(),
+				mv(uid),
+				maybeResource.moveResult(),
+				strategy
+			};
+}
+
 }  // anonymous namespace
 
 
 
-apsio::Result<AuthFile&>
-UnauthenticatedSessionHandler::beginAuthentication(styxe::Fid afid, StringView uname, StringView resource, uint32 uid) {
-	auto& strategy = authPolicy()->findAuthStrategyFor({uname, resource});
-
-	auto it = _fidToAuth.try_emplace(afid, AuthFile{uname, resource, strategy});
-	return apsio::Result<AuthFile&>{types::okTag, std::ref(it.first->second)};
+Auth::Strategy&
+UnauthenticatedSessionHandler::findAuthStrategy(StringView uname,
+												   Optional<uint32> uid,
+												   StringView resource) {
+	return authPolicy()->findAuthStrategyFor({uname, resource});
 }
 
 
 apsio::Result<kasofs::User>
-UnauthenticatedSessionHandler::authenticate(styxe::Fid afid, StringView name, StringView resource, uint32 uid) {
+UnauthenticatedSessionHandler::authenticate(styxe::Fid afid, StringView name, Optional<uint32> uid, StringView res) {
 	auto it = _fidToAuth.find(afid);
 	if (it == _fidToAuth.end()) {
 		return makeError(GenericError::IO, "authenticate");
 	}
 
 	auto& authFile = it->second;
-	return authFile.authenticate(name, resource);
+	return authFile.authenticate(name, uid, res);
+}
+
+
+styxe::Qid
+UnauthenticatedSessionHandler::beginAuth(styxe::Fid fid, AuthFile&& file) {
+	auto it = _fidToAuth.try_emplace(fid, mv(file));
+	auto& emplacedFile = it.first->second;
+
+	return authQid(emplacedFile);
 }
 
 
@@ -174,7 +239,7 @@ UnauthenticatedSessionHandler::findAuthForFid(styxe::Fid fid) {
 
 struct BaseRequestVisiter {
 #define DECLARE(T) \
-	apsio::Result<SessionStateTransition> operator()(T const&) { return unsupportedMessage(); }
+	MaybeTransition operator()(T const&) { return unsupportedMessage(); }
 
 	// Base 9P2000 protocol
 	DECLARE(styxe::Request::Version)
@@ -230,7 +295,7 @@ struct BaseRequestVisiter {
 struct UnversionedRequestVisiter : public BaseRequestVisiter {
 	using BaseRequestVisiter::operator();
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Version const& req) {
+	MaybeTransition operator()(styxe::Request::Version const& req) {
 		const auto minMessageSize = std::min(unversionedHandler.baseParser.maxMessageSize(), req.msize);
 
 		auto negotiatedVersion = selectProtocol(req.version);
@@ -252,36 +317,36 @@ struct UnversionedRequestVisiter : public BaseRequestVisiter {
 		return transitTo<UnauthenticatedSessionHandler>(versionedParser.moveResult(), authPolicy, mv(unversionedHandler));
 	}
 
-	apsio::Result<SessionStateTransition>
-	responseOk() {
+	MaybeTransition
+	responseOk() noexcept {
 		return SessionStateTransition{responseWriter.header(), mv(unversionedHandler)};
 	}
 
-	apsio::Result<SessionStateTransition>
+	MaybeTransition
 	transit(SessionHandler&& newSessionHandler) {
 		return SessionStateTransition{responseWriter.header(), mv(newSessionHandler)};
 	}
 
 	template<typename NextState, typename...Args>
-	apsio::Result<SessionStateTransition>
+	MaybeTransition
 	transitTo(Args&&...args) {
 		return SessionStateTransition{responseWriter.header(), NextState{fwd<Args>(args)...}};
 	}
 
 
-	apsio::Result<SessionStateTransition>
+	MaybeTransition
 	error(SessionHandler&& newSessionHandler, StringView message) {
 		responseWriter << styxe::Response::Error{message};
 		return SessionStateTransition{responseWriter.header(), mv(newSessionHandler)};
 	}
 
-	apsio::Result<SessionStateTransition>
+	MaybeTransition
 	error(SessionHandler&& newSessionHandler, GenericError SOLACE_UNUSED(errCode), StringView message) {
 		responseWriter << styxe::Response::Error{message};
 		return SessionStateTransition{responseWriter.header(), mv(newSessionHandler)};
 	}
 
-	apsio::Result<SessionStateTransition>
+	MaybeTransition
 	error(SessionHandler&& newSessionHandler, Error const& err) {
 		auto const domain = getErrorDomain(err.domain());
 		if (domain) {
@@ -314,7 +379,7 @@ struct UnversionedRequestVisiter : public BaseRequestVisiter {
 	UnversionedSessionHandler&		unversionedHandler;
 	std::shared_ptr<Auth::Policy>	authPolicy;
 
-	styxe::ResponseWriter		responseWriter;
+	styxe::ResponseWriter			responseWriter;
 };
 
 
@@ -329,25 +394,25 @@ struct UnauthenticatedRequestVisiter: public UnversionedRequestVisiter {
 		return error(mv(_unauthenticatedHandler), errCode, message);
 	}
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Auth const& req) {
-		return handleAuthRequest(req.afid, req.uname, req.aname, 0);
+	MaybeTransition operator()(styxe::Request::Auth const& req) {
+		return handleAuthRequest(req.afid, req.uname, none, req.aname);
 	}
 
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Auth const& req) {
-		return handleAuthRequest(req.afid, req.uname, req.aname, req.n_uname);
+	MaybeTransition operator()(styxe::_9P2000U::Request::Auth const& req) {
+		return handleAuthRequest(req.afid, req.uname, req.n_uname, req.aname);
 	}
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Attach const& req) {
-		return handleAttachRequest(req.fid, req.afid, req.uname, req.aname, 0);
+	MaybeTransition operator()(styxe::Request::Attach const& req) {
+		return handleAttachRequest(req.fid, req.afid, req.uname, none, req.aname);
 	}
 
-	apsio::Result<SessionStateTransition> operator()(styxe::_9P2000U::Request::Attach const& req) {
-		return handleAttachRequest(req.fid, req.afid, req.uname, req.aname, req.n_uname);
+	MaybeTransition operator()(styxe::_9P2000U::Request::Attach const& req) {
+		return handleAttachRequest(req.fid, req.afid, req.uname, req.n_uname, req.aname);
 	}
 
 
 	// Note: It should be possible to read data from afid if selected authentication scheme supports it
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Read const& req) {
+	MaybeTransition operator()(styxe::Request::Read const& req) {
 		auto maybeStrategy = _unauthenticatedHandler.findAuthForFid(req.fid);
 		if (!maybeStrategy) {
 			return responseNAK("Not attached fid");
@@ -361,7 +426,7 @@ struct UnauthenticatedRequestVisiter: public UnversionedRequestVisiter {
 
 
 	// Note: Write call is used to write authentication details into provided afid
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Write const& req) {
+	MaybeTransition operator()(styxe::Request::Write const& req) {
 		auto maybeStrategy = _unauthenticatedHandler.findAuthForFid(req.fid);
 		if (!maybeStrategy) {
 			return responseNAK("Not attached fid");
@@ -390,19 +455,33 @@ struct UnauthenticatedRequestVisiter: public UnversionedRequestVisiter {
 protected:
 
 	apsio::Result<SessionStateTransition>
-	handleAuthRequest(styxe::Fid afid, StringView uname, StringView aname, uint32 n_uname) {
+	handleAuthRequest(styxe::Fid afid, StringView uname, Optional<uint32> uid, StringView aname) {
 		// Prepare authentication mechanism for a new user idenfied as req.uname who wants to access resource req.aname
 
 		// SEC: Note: do NOT open a new auth file for each auth requiest - as it can lean to DoS
 
-		// TODO(abbyssoul): Even if user name is not valid - but auth is enabled - we should reply with ok, not error
-		auto maybeAuthFile = _unauthenticatedHandler.beginAuthentication(afid, uname, aname, n_uname);
+		// TODO(abbyssoul): Even if user name is not valid - but auth is enabled - we should reply with ok, not an error
+		auto& authStrategy = _unauthenticatedHandler.findAuthStrategy(uname, uid, aname);
+
+		// 9PSEC: http://knusbaum.com/useful/rfc9p2000#P9SEC
+		// If no auth is required - client must set its afid to NOFID on attach.
+		if (!authStrategy.isRequired) {
+			return responseNAK("Auth not required");
+		}
+
+		auto maybeAuthFile = make_auth(uname, uid, aname, authStrategy);
 		if (!maybeAuthFile) {
 			// ???? Internal server error! Close the session
 			responseWriter << styxe::Response::Auth{};
 			return responseOk();
 		}
 
+		auto authQid = _unauthenticatedHandler.beginAuth(afid, maybeAuthFile.moveResult());
+		responseWriter << styxe::Response::Auth{authQid};  // authQid(authFile)};
+		return responseOk();
+
+
+		/*
 		auto& authFile = *maybeAuthFile;
 		if (!authFile.isAuthRequired()) {
 			return responseNAK("Auth not required");
@@ -410,12 +489,19 @@ protected:
 
 		responseWriter << styxe::Response::Auth{authQid(authFile)};
 		return responseOk();
+		*/
 	}
 
 
 	apsio::Result<SessionStateTransition>
-	handleAttachRequest(styxe::Fid fid, styxe::Fid afid, StringView uname, StringView aname, uint32 n_uname) {
-		auto user = _unauthenticatedHandler.authenticate(afid, uname, aname, n_uname);
+	handleAttachRequest(styxe::Fid fid, styxe::Fid afid, StringView uname, Optional<uint32> uid, StringView aname) {
+		auto& authStrategy = _unauthenticatedHandler.findAuthStrategy(uname, uid, aname);
+
+
+		auto user = (afid == styxe::kNoFID && !authStrategy.isRequired)
+				? authStrategy.authenticate(uname, uid, aname, {})
+				: _unauthenticatedHandler.authenticate(afid, uname, uid, aname);
+
 		if (!user) {  // Authentication failed / incomplete
 			return responseNAK(GenericError::ACCES, "attach");
 		}
@@ -452,7 +538,7 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 	auto responseNAK(Error const& err) { return error(mv(sessionHandler), err); }
 	auto responseNAK(GenericError errCode, StringView message) { return error(mv(sessionHandler), errCode, message); }
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Walk const& req) {
+	MaybeTransition operator()(styxe::Request::Walk const& req) {
 		auto const maybeEntry = sessionHandler.entryByFid(req.fid);
 		if (!maybeEntry) {
 			return responseNAK("Not attached fid");
@@ -496,7 +582,7 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Open const& req) {
+	MaybeTransition operator()(styxe::Request::Open const& req) {
 		auto maybeEntry = sessionHandler.entryByFid(req.fid);
 		if (!maybeEntry) {
 			return responseNAK("Not attached fid");
@@ -510,25 +596,29 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 
 		auto i = sessionHandler.addOpened(req.fid, maybeFile.moveResult());
 
-		kasofs::INode node = i->second.stat();
-		responseWriter << styxe::Response::Open{nodeToQid(node), 0};
+		auto maybeStats = i->second.stat();
+		 if (!maybeStats) {
+			return responseNAK(maybeStats.getError());
+		 }
+
+		responseWriter << styxe::Response::Open{nodeToQid(*maybeStats), 0};
 		return responseOk();
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Stat const& req) {
-		auto maybeNode = sessionHandler.entryByFid(req.fid);
-		if (!maybeNode) {
+	MaybeTransition operator()(styxe::Request::Stat const& req) {
+		auto maybeEntry = sessionHandler.entryByFid(req.fid);
+		if (!maybeEntry) {
 			return responseNAK("Not attached fid");
 		}
 
 		auto& vfs = sessionHandler.vfs();
-		auto& node = *maybeNode;
-		auto maybeFsNode = vfs.nodeById(node.nodeId);
+		auto& entry = *maybeEntry;
+		auto maybeFsNode = vfs.nodeById(entry.nodeId);
 		if (!maybeFsNode)
 			return responseNAK(GenericError::NOENT, "stat");
 
-		auto nodeMeta = nodeStats(node.name, *maybeFsNode);
+		auto nodeMeta = nodeStats(vfs, entry, *maybeFsNode);
 		auto const datumSize = styxe::protocolSize(nodeMeta);
 		responseWriter << styxe::Response::Stat{
 								  narrow_cast<styxe::var_datum_size_type>(datumSize),
@@ -537,14 +627,14 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Flush const&) {
+	MaybeTransition operator()(styxe::Request::Flush const&) {
 		// NOTE: In a single threaded environment - there are no concurrent operations
 		responseWriter << styxe::Response::Flush{};
 		return responseOk();
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Clunk const& req) {
+	MaybeTransition operator()(styxe::Request::Clunk const& req) {
 		auto maybeNode = sessionHandler.entryByFid(req.fid);
 		if (!maybeNode) {
 			return responseNAK("Not attached");
@@ -558,7 +648,7 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Read const& req) {
+	MaybeTransition operator()(styxe::Request::Read const& req) {
 		auto maybeOk = requiresNode(req.fid, "read");
 		if (!maybeOk)
 			return responseNAK(maybeOk.getError());
@@ -568,17 +658,17 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 
 		if (kasofs::isDirectory(node)) {
 			auto dirWriter = styxe::DirListingWriter{responseWriter, req.count, req.offset};
-			auto maybeIter = vfs.enumerateDirectory(fidEntry.nodeId, user);
+			auto maybeIter = vfs.enumerateDirectory(user, fidEntry.nodeId);
 			if (!maybeIter)
 				return responseNAK(maybeIter.getError());
 
-			for (auto const& entry : *maybeIter) {
+			for (auto entry : *maybeIter) {
 				auto entryNode = vfs.nodeById(entry.nodeId);
 				if (!entryNode) {
 					return responseNAK(GenericError::IO, "read");
 				}
 
-				if (!dirWriter.encode(nodeStats(entry.name, *entryNode))) {
+				if (!dirWriter.encode(nodeStats(vfs, entry, *entryNode))) {
 					break;
 				}
 			}
@@ -586,31 +676,28 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 			return responseOk();
 		}
 
-		// Case of a file:
-		auto maybeOpenedFile = vfs.open(user, fidEntry.nodeId, kasofs::Permissions::READ);
+		// Case of 'regular' a file:
+		auto maybeOpenedFile = sessionHandler.findOpened(req.fid);
 		if (!maybeOpenedFile)
-			return responseNAK(maybeOpenedFile.getError());
+			return responseNAK("not opened");
 
-		auto& file = (*maybeOpenedFile);
+		auto& file = *(*maybeOpenedFile);
 		auto maybeOffset = file.seekRead(req.offset, kasofs::Filesystem::SeekDirection::FromStart);
 		if (!maybeOffset)
 			return responseNAK(maybeOffset.getError());
 
 		auto dataWriter = responseWriter << styxe::Response::Partial::Read{};
-
-		// FIXME: Broken!
-		MutableMemoryView dataDest;
-		auto maybeReader = file.read(dataDest);
+		MutableMemoryView dataDest = dataWriter.viewRemainder();
+		auto maybeReader = file.read(dataDest.slice(0, req.count));
 		if (!maybeReader)
 			return responseNAK(maybeReader.getError());
-
-		dataWriter.data(dataDest);
+		dataWriter.update(*maybeReader);
 
 		return responseOk();
 	}
 
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Write const& req) {
+	MaybeTransition operator()(styxe::Request::Write const& req) {
 		auto maybeOk = requiresNode(req.fid, "write");
 		if (!maybeOk)
 			return responseNAK(maybeOk.getError());
@@ -647,11 +734,11 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 		return responseNAK("Not supported");
 	}
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::Remove const& ) {
+	MaybeTransition operator()(styxe::Request::Remove const& ) {
 		return responseNAK("Not supported");
 	}
 
-	apsio::Result<SessionStateTransition> operator()(styxe::Request::WStat const& )  {
+	MaybeTransition operator()(styxe::Request::WStat const& )  {
 		return responseNAK("Not supported");
 	}
 
@@ -685,7 +772,7 @@ struct StyxeRequestVisiter final : public UnauthenticatedRequestVisiter {
 
 struct SessionStateHandler {
 
-	apsio::Result<SessionStateTransition> operator()(UnversionedSessionHandler& handler) {
+	MaybeTransition operator()(UnversionedSessionHandler& handler) {
 		return handler.baseParser
 				.parseVersionRequest(messageHeader, payloadStream)
 				.then([this, &handler](styxe::Request::Version req) {
@@ -694,7 +781,7 @@ struct SessionStateHandler {
 				});
 	}
 
-	apsio::Result<SessionStateTransition> operator()(UnauthenticatedSessionHandler& handler) {
+	MaybeTransition operator()(UnauthenticatedSessionHandler& handler) {
 		return handler.parser()
 				.parseRequest(messageHeader, payloadStream)
 				.then([this, &handler](styxe::RequestMessage const& req) {
@@ -702,7 +789,7 @@ struct SessionStateHandler {
 				});
 	}
 
-	apsio::Result<SessionStateTransition> operator()(SessionProtocolHandler& handler) {
+	MaybeTransition operator()(SessionProtocolHandler& handler) {
 		return handler.parser()
 				.parseRequest(messageHeader, payloadStream)
 				.then([this, &handler](styxe::RequestMessage&& req) {
@@ -733,8 +820,8 @@ struct SessionStateHandler {
 
 struct MessageTypeNamer {
 
-	StringView operator()(UnversionedSessionHandler const& handler) noexcept {
-		return handler.baseParser.messageName(_type);
+	StringView operator()(UnversionedSessionHandler const&) noexcept {
+		return styxe::messageTypeToString(_type);
 	}
 
 	StringView operator()(UnauthenticatedSessionHandler const& handler) {

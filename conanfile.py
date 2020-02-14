@@ -29,8 +29,8 @@ class LibapsioConan(ConanFile):
     }
     requires = [
             "libsolace/0.3.9",
-            "libstyxe/0.7.5@abbyssoul/stable",
-            "libkasofs/0.3.7@abbyssoul/stable",
+            "libstyxe/0.7.8@abbyssoul/stable",
+            "libkasofs/0.3.11@abbyssoul/stable",
             "libdialstring/0.1.2@abbyssoul/stable",
             "asio/1.13.0"]
     build_requires = "gtest/1.10.0"

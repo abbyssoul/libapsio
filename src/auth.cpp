@@ -1,12 +1,18 @@
 /*
-*  Copyright (C) Ivan Ryabov - All Rights Reserved
+*  Copyright (C) 2020 Ivan Ryabov
 *
-*  Unauthorized copying of this file, via any medium is strictly prohibited.
-*  Proprietary and confidential.
+*  Licensed under the Apache License, Version 2.0 (the "License");
+*  you may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
 *
-*  Written by Ivan Ryabov <abbyssoul@gmail.com>
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
 */
-
 #include "apsio/auth.hpp"
 
 #include <algorithm>
@@ -31,11 +37,14 @@ Optional<kasofs::User>
 lookup(StringView uname) {
 	char uNameBuffer[256];
 	char pwdBuffer[256];
-	strncpy(uNameBuffer, uname.data(), std::min<size_t>(sizeof(uNameBuffer), uname.size()));
+
+	auto unameSize = std::min<size_t>(sizeof(uNameBuffer) - 1, uname.size());
+	strncpy(uNameBuffer, uname.data(), unameSize);
+	uNameBuffer[unameSize] = 0;
 
 	passwd pass;
 	passwd* result;
-	if (getpwnam_r(uNameBuffer, &pass, pwdBuffer, sizeof (pwdBuffer), &result) != 0)
+	if (getpwnam_r(uNameBuffer, &pass, pwdBuffer, sizeof(pwdBuffer), &result) != 0)
 		return none;  // Error retrieving record. Probably buffer too small :(
 
 	if (result != &pass)
@@ -57,7 +66,7 @@ Auth::Match::matches(Match other) const noexcept {
 
 
 apsio::Result<kasofs::User>
-Auth::Strategy::authenticate(StringView uname, StringView SOLACE_UNUSED(resource), MemoryView SOLACE_UNUSED(data)) {
+Auth::Strategy::authenticate(StringView uname, Optional<uint32> uid, StringView, MemoryView) {
 	auto maybeUser = lookup(uname);
 	if (!maybeUser) {
 		return makeError(GenericError::PERM, "auth");
