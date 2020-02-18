@@ -47,5 +47,5 @@ Server::listen(styxe::DialString endpoint, Config&& config, Observer& sessionObs
 		return started.moveError();
 	}
 
-	return apsio::Result<std::shared_ptr<Server::ConnectionListener>>{types::okTag, in_place, maybeServer.moveResult()};
+	return apsio::Result<std::shared_ptr<Server::ConnectionListener>>{types::okTag, maybeServer.moveResult()};
 }

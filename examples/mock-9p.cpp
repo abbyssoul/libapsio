@@ -190,7 +190,6 @@ struct RegularFS final : public kasofs::Filesystem {
 			node.mtime = fileStats.st_mtim.tv_sec;
 			node.dataSize = fileStats.st_size;
 			node.owner = kasofs::User{fileStats.st_uid, fileStats.st_gid};
-//			node.permissions = fileStats.st_mode;
 		}
 	}
 
@@ -288,31 +287,32 @@ int main(int argc, char* const* argv) {
 
 //		}
 
-		auto maybeNodeId = vfs.mknode(vfs.rootId(), fileName, fsId, 0, currentUser);
-		if (!maybeNodeId) {
-			std::cerr << "[Internal]: Failed to register file: " << maybeNodeId.getError() << '\n';
-			return EXIT_FAILURE;
-		}
+		 auto baseName = filePath.filename();
+		 auto baseNameView = StringView{baseName.c_str()};
+		 auto maybeNodeId = vfs.mknode(vfs.rootId(), baseNameView, fsId, 0, currentUser);
+		 if (!maybeNodeId) {
+			 std::cerr << "[Internal]: Failed to register file: " << maybeNodeId.getError() << '\n';
+			 return EXIT_FAILURE;
+		 }
 
-		auto boundName = vfs.nodeById(*maybeNodeId)
-				.map([fileName, fsDriver, &vfs, &maybeNodeId](kasofs::INode& node) {
-					fsDriver->bind(fileName, node);
-					vfs.updateNode(*maybeNodeId, node);
-					return 0;
-				});
+		 auto boundName = vfs.nodeById(*maybeNodeId)
+				 .map([fileName, fsDriver, &vfs, &maybeNodeId](kasofs::INode& node) {
+					 fsDriver->bind(fileName, node);
+					 vfs.updateNode(*maybeNodeId, node);
+					 return 0;
+				 });
 
-		if (!boundName) {
-			std::cerr << "[Internal]: Failed to bind filename: " << fileName << '\n';
-			return EXIT_FAILURE;
-		}
+		 if (!boundName) {
+			 std::cerr << "[Internal]: Failed to bind filename: " << fileName << '\n';
+			 return EXIT_FAILURE;
+		 }
 
-
-		std::clog << "[ok]\n";
+		 std::clog << "[ok]\n";
 	}
 
 	// Create a couple of fake RAM fs files:
 	auto const ramFsId = *maybeRamFsDriverId;
-	auto maybeRamNodeId_1 = vfs.mknode(vfs.rootId(), "mock-1.ram", ramFsId, 0, currentUser);
+	auto maybeRamNodeId_1 = vfs.mknode(vfs.rootId(), "mock-1.ram", ramFsId, kasofs::RamFS::kNodeType, currentUser);
 	if (!maybeRamNodeId_1) {
 		std::cerr << "[Internal]: Failed to create tmp ram file: " << maybeRamNodeId_1.getError() << '\n';
 		return EXIT_FAILURE;
@@ -354,7 +354,6 @@ int main(int argc, char* const* argv) {
 			return;
 		}
 
-		// TODO: It would be nice to know how many clients we dropped.
 		std::clog << "Stop listening due to signal" << signal_number << std::endl;
 		maybeListener.unwrap()->terminate();
 		maybeListener.unwrap().reset();

@@ -26,7 +26,7 @@ using namespace styxe;
 apsio::Result<void> apsio::AsyncServerBase::terminate() { return Ok(); }
 
 
-Result<void, asio::error_code>
+Solace::Result<void, asio::error_code>
 apsio::impl::startAcceptor(asio::local::stream_protocol::acceptor& acceptor, DialString const& ds) {
 	asio::error_code ec;
 
@@ -59,7 +59,7 @@ apsio::impl::startAcceptor(asio::local::stream_protocol::acceptor& acceptor, Dia
 
 
 
-Result<void, asio::error_code>
+Solace::Result<void, asio::error_code>
 apsio::impl::startAcceptor(asio::ip::tcp::acceptor& acceptor, DialString const& ds) {
 	asio::error_code ec;
 

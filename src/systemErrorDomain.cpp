@@ -31,7 +31,7 @@ AtomValue const apsio::impl::kAsioSystemErrorCatergory    = atom("asio");
 
 namespace /*anonimous*/ {
 
-struct GenericErrorDomain : public ErrorDomain {
+struct GenericErrorDomain final : public ErrorDomain {
 
     StringView name() const noexcept override { return std::generic_category().name(); }
 
@@ -42,7 +42,7 @@ struct GenericErrorDomain : public ErrorDomain {
 };
 
 
-struct SystemErrorDomain : public ErrorDomain {
+struct SystemErrorDomain final : public ErrorDomain {
 
     StringView name() const noexcept override { return std::system_category().name(); }
 
@@ -56,7 +56,7 @@ struct SystemErrorDomain : public ErrorDomain {
     }
 };
 
-struct AsioSystemErrorDomain : public ErrorDomain {
+struct AsioSystemErrorDomain final : public ErrorDomain {
 
     StringView name() const noexcept override { return asio::system_category().name(); }
 

@@ -54,12 +54,13 @@ namespace impl {
  * 9p Message handler until protocol version has been negotiated
  */
 struct UnversionedSessionHandler {
-	constexpr UnversionedSessionHandler(styxe::size_type maxPayloadSize) noexcept
-		: baseParser{maxPayloadSize}
+	constexpr UnversionedSessionHandler(styxe::size_type payloadSize) noexcept
+		: maxPayloadSize{payloadSize}
 	{}
 
-	styxe::UnversionedParser				baseParser;
+	styxe::size_type maxPayloadSize;
 };
+
 
 // UnversionedSessionHandler type requirements
 static_assert(std::is_move_assignable_v<UnversionedSessionHandler>, "UnversionedSessionHandler should be movable");
@@ -79,8 +80,9 @@ struct UnauthenticatedSessionHandler : public UnversionedSessionHandler {
 		, _authPolicy{Solace::mv(auth)}
 	{}
 
-	styxe::RequestParser&			parser() noexcept		{ return _parser; }
-	std::shared_ptr<Auth::Policy>	authPolicy() noexcept	{ return _authPolicy; }
+	styxe::RequestParser&			parser() noexcept			{ return _parser; }
+	styxe::RequestParser const&		parser() const noexcept		{ return _parser; }
+	std::shared_ptr<Auth::Policy>	authPolicy() const noexcept	{ return _authPolicy; }
 
 	Auth::Strategy&			findAuthStrategy(Solace::StringView uname,
 											 Solace::Optional<Solace::uint32> uid,
@@ -93,6 +95,7 @@ struct UnauthenticatedSessionHandler : public UnversionedSessionHandler {
 	styxe::Qid beginAuth(styxe::Fid fid, AuthFile&& file);
 	Result<AuthFile&>		findAuthForFid(styxe::Fid fid);
 
+protected:
 
 	styxe::RequestParser						_parser;
 	std::shared_ptr<Auth::Policy>				_authPolicy;
@@ -112,35 +115,50 @@ static_assert(std::is_move_constructible_v<UnauthenticatedSessionHandler>);
 struct SessionProtocolHandler final : public UnauthenticatedSessionHandler {
 	using size_type = styxe::size_type;
 
+	struct FidEntry {
+		kasofs::Entry		entry;
+		kasofs::INode::Id	parentId;
+
+		constexpr FidEntry(kasofs::Entry e, kasofs::INode::Id pId) noexcept
+			: entry{e}
+			, parentId{pId}
+		{}
+
+		constexpr FidEntry(Solace::StringView name, kasofs::INode::Id nodeId, kasofs::INode::Id pId) noexcept
+			: entry{name, nodeId}
+			, parentId{pId}
+		{}
+	};
 
 	SessionProtocolHandler(kasofs::User user, kasofs::Vfs& vfs,
 						   styxe::Fid fid, Solace::StringView aname, kasofs::INode::Id id,
-
 						   UnauthenticatedSessionHandler&& handler) noexcept
 		: UnauthenticatedSessionHandler{Solace::mv(handler)}
 		, _vfs{vfs}
 		, _user{user}
 	{
-		hashFid(fid, aname, id);
+		hashFid(fid, aname, id, id);
 	}
 
-	kasofs::Vfs& vfs() noexcept							{ return _vfs; }
-	kasofs::User user() noexcept						{ return _user; }
+	kasofs::Vfs& vfs() noexcept		{ return _vfs; }
+	kasofs::User user() noexcept	{ return _user; }
 
-
-	void hashFid(styxe::Fid fid, Solace::StringView name, kasofs::INode::Id nodeIndex) noexcept {
-		_fidToEntry.try_emplace(fid, name, nodeIndex);
+	bool
+	hashFid(styxe::Fid fid, Solace::StringView name, kasofs::INode::Id nodeId, kasofs::INode::Id parentId) noexcept {
+		return _fidToEntry.try_emplace(fid, name, nodeId, parentId).second;
 	}
 
-	void hashFid(styxe::Fid fid, kasofs::Entry entry) noexcept {
-		_fidToEntry.try_emplace(fid, entry);
+	bool
+	hashFid(styxe::Fid fid, FidEntry entry) noexcept {
+		return _fidToEntry.try_emplace(fid, entry).second;
 	}
 
-	void removeEntryByFid(styxe::Fid fid) {
+	void
+	removeEntryByFid(styxe::Fid fid) {
 		_fidToEntry.erase(fid);
 	}
 
-	Solace::Optional<kasofs::Entry>
+	Solace::Optional<FidEntry>
 	entryByFid(styxe::Fid fid) const noexcept {
 		auto it = _fidToEntry.find(fid);
 		if (it == _fidToEntry.end()) {
@@ -152,11 +170,11 @@ struct SessionProtocolHandler final : public UnauthenticatedSessionHandler {
 
 
 	auto addOpened(styxe::Fid fid, kasofs::File&& file) {
-		return _openedNodes.emplace(fid, Solace::mv(file)).first;
+		return _openedNodes.try_emplace(fid, Solace::mv(file)).first;
 	}
 
 	Solace::Optional<kasofs::File*>
-	findOpened(styxe::Fid fid) {
+	findOpened(styxe::Fid fid) noexcept {
 		auto it = _openedNodes.find(fid);
 		if (it == _openedNodes.end()) {
 			return Solace::none;
@@ -170,12 +188,13 @@ struct SessionProtocolHandler final : public UnauthenticatedSessionHandler {
 	}
 
 private:
+
 	std::reference_wrapper<kasofs::Vfs>		_vfs;
 	kasofs::User							_user;
 
 	// Cache
+	std::unordered_map<styxe::Fid, FidEntry>		_fidToEntry;
 	std::unordered_map<styxe::Fid, kasofs::File>	_openedNodes;
-	std::unordered_map<styxe::Fid, kasofs::Entry>   _fidToEntry;
 };
 
 // SessionProtocolHandler type requirements
