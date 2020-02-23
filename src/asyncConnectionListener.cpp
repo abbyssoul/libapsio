@@ -94,14 +94,14 @@ apsio::impl::startAcceptor(asio::ip::tcp::acceptor& acceptor, DialString const& 
 apsio::Result<std::shared_ptr<apsio::AsyncServerBase>>
 apsio::createServer(AtomValue protocol, Server& server, Observer& observer, Server::Config&& config) {
 #ifdef ASIO_HAS_LOCAL_SOCKETS
-	if (styxe::kProtocolUnix == protocol) {
+	if (kProtocolUnix == protocol) {
 		return makeListener<asio::local::stream_protocol>(server,
 														  std::make_shared<Auth::Policy>(mv(config.authPolicy)),
 														  observer,
 														  config);
 	}
 #endif
-	if (styxe::kProtocolTCP == protocol) {
+	if (kProtocolTCP == protocol) {
 		return makeListener<asio::ip::tcp>(server,
 										   std::make_shared<Auth::Policy>(mv(config.authPolicy)),
 										   observer,

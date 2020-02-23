@@ -60,7 +60,7 @@ TEST_F(TestServer, listeningOnNoAddressFails) {
 
 	Server::Config config;
 
-	styxe::DialString invalidEndpoint;
+	DialString invalidEndpoint;
 	auto maybeListeners = server.listen(invalidEndpoint, mv(config));
 	EXPECT_TRUE(maybeListeners.isError());
 }
@@ -72,13 +72,13 @@ TEST_F(TestServer, callingListenMoreThenOnceIsOk) {
 	std::string strPath{"unix:"};
 	strPath += (std::filesystem::temp_directory_path() / "apsio.test");
 
-	auto maybeLocal = styxe::tryParseDailString(StringView(strPath.data(), strPath.size()));
+	auto maybeLocal = tryParseDailString(StringView(strPath.data(), strPath.size()));
 	ASSERT_TRUE(maybeLocal.isOk());
 
 	auto maybeListeners1 = server.listen(*maybeLocal, Server::Config{});
 	EXPECT_TRUE(maybeListeners1.isOk());
 
-	auto maybeRemote = styxe::tryParseDailString("tcp:0.0.0.0:53535");
+	auto maybeRemote = tryParseDailString("tcp:0.0.0.0:53535");
 	ASSERT_TRUE(maybeRemote.isOk());
 
 	auto maybeListeners2 = server.listen(*maybeRemote, Server::Config{});
@@ -91,7 +91,7 @@ TEST_F(TestServer, emptyAuthPolicyDenyAll) {
 
 	std::string strPath{"unix:"};
 	strPath += (std::filesystem::temp_directory_path() / "apsio.test");
-	auto maybeLocal = styxe::tryParseDailString(StringView(strPath.data(), strPath.size()));
+	auto maybeLocal = tryParseDailString(StringView(strPath.data(), strPath.size()));
 	ASSERT_TRUE(maybeLocal.isOk());
 
 	Server::Config config;

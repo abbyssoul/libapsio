@@ -38,9 +38,9 @@ struct SimpleServer final :
 
 
 	// Connection listeners signals:
-	void onError(styxe::DialString endpoint, Error error) override;
+	void onError(Solace::DialString endpoint, Error error) override;
 
-	void onSessionAccepted(styxe::DialString endpoint, std::shared_ptr<Session> newSession) override;
+	void onSessionAccepted(Solace::DialString endpoint, std::shared_ptr<Session> newSession) override;
 	void onSessionTerminated(std::shared_ptr<Session> session) override;
 
 
@@ -51,7 +51,7 @@ struct SimpleServer final :
 	 * @return A new state of the server
 	 */
 	Result<std::shared_ptr<ConnectionListener>>
-	listen(styxe::DialString endpoint, Config&& config) {
+	listen(Solace::DialString endpoint, Config&& config) {
 		return Server::listen(endpoint, Solace::mv(config), *this);
 	}
 

@@ -67,9 +67,9 @@ struct AsioSystemErrorDomain final : public ErrorDomain {
 };
 
 
-const SystemErrorDomain systemErrorDomain{};
-const GenericErrorDomain genericErrorDomain{};
-const AsioSystemErrorDomain asioErrorDomain{};
+SystemErrorDomain systemErrorDomain{};
+GenericErrorDomain genericErrorDomain{};
+AsioSystemErrorDomain asioErrorDomain{};
 
 
 auto const rego_generic = registerErrorDomain(kGenericErrorCatergory, genericErrorDomain);

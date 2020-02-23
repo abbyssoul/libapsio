@@ -18,7 +18,6 @@
 #include <kasofs/extras/ramfsDriver.hpp>
 #include <solace/posixErrorDomain.hpp>
 #include <solace/output_utils.hpp>
-#include <dialstring/ostream.hpp>
 
 #include <asio/signal_set.hpp>
 
@@ -32,7 +31,6 @@
 
 
 using namespace Solace;
-using namespace styxe;
 namespace fs = std::filesystem;
 
 namespace /*anonymous*/ {
@@ -220,7 +218,7 @@ int main(int argc, char* const* argv) {
 		return usage(argv[0]);
 	}
 
-	auto maybeBind = styxe::tryParseDailString(argv[1]);
+	auto maybeBind = tryParseDailString(argv[1]);
 	if (!maybeBind) {
 		return logAndExit("Error parsing dial-string", maybeBind);
 	}

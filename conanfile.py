@@ -28,10 +28,8 @@ class LibapsioConan(ConanFile):
        "revision": "auto"
     }
     requires = [
-            "libsolace/0.3.11@abbyssoul/stable",
-            "libstyxe/0.7.10@abbyssoul/stable",
-            "libkasofs/0.3.13@abbyssoul/stable",
-            "libdialstring/0.1.4@abbyssoul/stable",
+            "libstyxe/0.7.11@abbyssoul/stable",
+            "libkasofs/0.3.14@abbyssoul/stable",
             "asio/1.13.0"]
     build_requires = "gtest/1.10.0"
 

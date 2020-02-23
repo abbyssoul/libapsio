@@ -35,17 +35,17 @@ struct AsyncServerBase :
 
 	Result<void> terminate() override;
 
-	virtual Result<void> listen(styxe::DialString ds) = 0;
+	virtual Result<void> listen(Solace::DialString ds) = 0;
 };
 
 
 namespace impl {
 
 Solace::Result<void, asio::error_code>
-startAcceptor(asio::local::stream_protocol::acceptor& acceptor, styxe::DialString const& config);
+startAcceptor(asio::local::stream_protocol::acceptor& acceptor, Solace::DialString const& config);
 
 Solace::Result<void, asio::error_code>
-startAcceptor(asio::ip::tcp::acceptor& acceptor, styxe::DialString const& config);
+startAcceptor(asio::ip::tcp::acceptor& acceptor, Solace::DialString const& config);
 
 
 /**
@@ -70,7 +70,7 @@ struct AsyncServer final :
 	}
 
 	Result<void>
-	listen(styxe::DialString ds) override {
+	listen(Solace::DialString ds) override {
 		auto startResult = startAcceptor(_acceptor, ds);
 		if (!startResult) {
 			return fromAsioError(startResult.getError());
@@ -120,7 +120,7 @@ private:
 	Server::BaseConfig			_config;
 	Acceptor			        _acceptor;
 
-	styxe::DialString			_boundTo;
+	Solace::DialString			_boundTo;
 };
 
 

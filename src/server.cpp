@@ -19,8 +19,6 @@
 #include "asyncConnectionListener.hpp"
 
 using namespace Solace;
-using namespace kasofs;
-using namespace styxe;
 using namespace apsio;
 
 
@@ -36,7 +34,7 @@ static_assert(std::is_move_constructible_v<Server::Config>);
 
 
 apsio::Result<std::shared_ptr<Server::ConnectionListener>>
-Server::listen(styxe::DialString endpoint, Config&& config, Observer& sessionObserver) {
+Server::listen(DialString endpoint, Config&& config, Observer& sessionObserver) {
 	auto maybeServer = createServer(endpoint.protocol, *this, sessionObserver, mv(config));
 	if (!maybeServer) {
 		return maybeServer.moveError();

@@ -344,7 +344,7 @@ struct UnversionedRequestVisiter : public BaseRequestVisiter {
 	error(SessionHandler&& newSessionHandler, Error const& err) {
 		auto const domain = findErrorDomain(err.domain());
 		if (domain) {
-			return error(mv(newSessionHandler), (*domain)->message(err.value()).view());
+			return error(mv(newSessionHandler), (*domain).message(err.value()).view());
 		}
 
 		// In case domain is not known:

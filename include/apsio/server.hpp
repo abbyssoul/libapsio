@@ -21,8 +21,7 @@
 #include "auth.hpp"
 
 #include <kasofs/kasofs.hpp>
-#include <dialstring/dialstring.hpp>
-
+#include <solace/dialstring.hpp>
 #include <solace/posixErrorDomain.hpp>
 
 #include <asio/io_context.hpp>
@@ -76,14 +75,14 @@ struct Observer {
 	 * @param listenerInterface Dialstring passed to the listener to identify listener interface.
 	 * @param newSession An newly created session.
 	 */
-	virtual void onSessionAccepted(styxe::DialString listenerInterface, std::shared_ptr<Session> newSession) = 0;
+	virtual void onSessionAccepted(Solace::DialString listenerInterface, std::shared_ptr<Session> newSession) = 0;
 
 	/**
 	 * Event hadler: An error occured when attempting to accept a new session.
 	 * @param listenerInterface Dialstring passed to the listener to identify listener interface.
 	 * @param error Error details.
 	 */
-	virtual void onError(styxe::DialString listenerInterface, Error error) = 0;
+	virtual void onError(Solace::DialString listenerInterface, Error error) = 0;
 
 	/**
 	 * Terminate has been called on a session object and no read operations will be scheduler for it.
@@ -182,7 +181,7 @@ public:
 	 * @return A new state of the server
 	 */
 	Result<std::shared_ptr<ConnectionListener>>
-	listen(styxe::DialString endpoint, Config&& config, Observer& sessionObserver);
+	listen(Solace::DialString endpoint, Config&& config, Observer& sessionObserver);
 
 
 private:
