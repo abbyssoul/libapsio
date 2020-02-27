@@ -22,7 +22,7 @@
 #include <asio/signal_set.hpp>
 
 #include <iostream>
-#include <filesystem> // C++17
+#include <filesystem> // C++17 filesystem for file name handling
 #include <map>
 
 #include <stdlib.h>
@@ -58,34 +58,34 @@ usage(const char* progname) {
 }
 
 
-kasofs::User
-getSystemUser() noexcept {
-	return {getuid(), getgid()};
-}
-
-
 template <typename T>
-int
-logAndExit(const char* message, T&& maybeError) {
-	if (maybeError)
+int logAndExit(const char* message, T&& maybeResult) {
+	if (maybeResult)
 		return EXIT_SUCCESS;
 
 	std::cerr << message
 			  << ": "
-			  << maybeError.getError()
+			  << maybeResult.getError()
 			  << ". terminating\n";
 
 	return EXIT_FAILURE;
 }
 
 
+kasofs::User
+getSystemUser() noexcept {
+	return {getuid(), getgid()};
+}
 
 
+/**
+ * VFS driver to serve *regular* system files.
+ */
 struct RegularFS final : public kasofs::Filesystem {
 	using FileHandle = std::unique_ptr<FILE, decltype(&fclose)>;
 
 	// Filesystem interface
-	kasofs::FilePermissions defaultFilePermissions(NodeType type) const noexcept override { return {0666}; }
+	kasofs::FilePermissions defaultFilePermissions(NodeType) const noexcept override { return {0666}; }
 
 	kasofs::Result<kasofs::INode>
 	createNode(NodeType type, kasofs::User owner, kasofs::FilePermissions perms) override {
@@ -101,7 +101,7 @@ struct RegularFS final : public kasofs::Filesystem {
 	}
 
 	kasofs::Result<OpenFID>
-	open(kasofs::INode& node, kasofs::Permissions op) override {
+	open(kasofs::INode& node, kasofs::Permissions) override {
 		auto boundNameIt = _nameBind.find(node.vfsData);
 		if (boundNameIt == _nameBind.end()) {
 			return makeError(GenericError::NOENT, "open: node name not bound");
@@ -118,7 +118,7 @@ struct RegularFS final : public kasofs::Filesystem {
 	}
 
 	kasofs::Result<size_type>
-	read(OpenFID streamId, kasofs::INode& node, size_type offset, Solace::MutableMemoryView dest) override {
+	read(OpenFID streamId, kasofs::INode&, size_type, Solace::MutableMemoryView dest) override {
 		auto it = _openFiles.find(streamId);
 		if (it == _openFiles.end()) {
 			return makeError(GenericError::IO, "read");
@@ -135,7 +135,7 @@ struct RegularFS final : public kasofs::Filesystem {
 
 
 	kasofs::Result<size_type>
-	write(OpenFID streamId, kasofs::INode& node, size_type offset, Solace::MemoryView src) override {
+	write(OpenFID streamId, kasofs::INode&, size_type, Solace::MemoryView src) override {
 		auto it = _openFiles.find(streamId);
 		if (it == _openFiles.end()) {
 			return makeError(GenericError::IO, "write");
@@ -152,7 +152,7 @@ struct RegularFS final : public kasofs::Filesystem {
 
 
 	kasofs::Result<size_type>
-	seek(OpenFID streamId, kasofs::INode& node, size_type offset, SeekDirection direction) override {
+	seek(OpenFID streamId, kasofs::INode&, size_type offset, SeekDirection direction) override {
 		auto it = _openFiles.find(streamId);
 		if (it == _openFiles.end()) {
 			return makeError(GenericError::IO, "seek");
@@ -173,7 +173,7 @@ struct RegularFS final : public kasofs::Filesystem {
 
 
 	kasofs::Result<void>
-	close(OpenFID streamId, kasofs::INode& node) override {
+	close(OpenFID streamId, kasofs::INode&) override {
 		_openFiles.erase(streamId);
 		return Ok();
 	}
@@ -207,53 +207,30 @@ private:
 };
 
 
-}  // anonymous namespace
-
-
-/**
- * A simple example of decoding a 9P message from a file / stdin and printing it in a human readable format.
- */
-int main(int argc, char* const* argv) {
-	if (argc < 2) {
-		return usage(argv[0]);
-	}
-
-	auto maybeBind = tryParseDailString(argv[1]);
-	if (!maybeBind) {
-		return logAndExit("Error parsing dial-string", maybeBind);
-	}
-
+apsio::Auth::Policy
+configureAuthPolicy() {
 	apsio::Auth::Policy::ACL acl{{"*", "*"}, std::make_unique<apsio::Auth::Strategy>()};
 	acl.strategy->isRequired = false;
 
 	auto maybePolicy = makeArrayOf<apsio::Auth::Policy::ACL>(mv(acl));
 	// CHECK ERRORS
 
-	apsio::Auth::Policy policy{maybePolicy.moveResult()};
+	return apsio::Auth::Policy{maybePolicy.moveResult()};
+}
 
-	apsio::Server::Config config{};
-	config.authPolicy = mv(policy);
 
-	auto currentUser = getSystemUser();
-	auto vfs = kasofs::Vfs{currentUser, kasofs::FilePermissions{0777}};
+Solace::Result<void, Error>
+mountFiles(kasofs::Vfs& vfs, kasofs::User user, int argc, char* const* argv) {
 	auto maybeFsDriverId = vfs.registerFilesystem<RegularFS>();
 	if (!maybeFsDriverId) {
-		std::cerr << "[Internal]: Failed to register fs driver: " << maybeFsDriverId.getError() << '\n';
-		return EXIT_FAILURE;
+		std::cerr << "[Internal]: Failed to register fs driver\n";
+		return maybeFsDriverId.moveError();
 	}
-
-	auto maybeRamFsDriverId = vfs.registerFilesystem<kasofs::RamFS>(4096);
-	if (!maybeRamFsDriverId) {
-		std::cerr << "[Internal]: Failed to register RAM fs driver: " << maybeRamFsDriverId.getError() << '\n';
-		return EXIT_FAILURE;
-	}
-
 
 	auto fsId = *maybeFsDriverId;
 	auto maybeFsDriver = vfs.findFs(fsId);
-	if (!maybeFsDriver)  {
-		std::cerr << "[Internal]: Failed to get registered fs driver.\n";
-		return EXIT_FAILURE;
+	if (!maybeFsDriver) {
+		return makeError(GenericError::IO, "Failed to retrieve registered RegularFS driver.");
 	}
 
 
@@ -266,31 +243,21 @@ int main(int argc, char* const* argv) {
 		 if (!fs::exists(filePath)) {
 			 std::clog << "[failure]\n";
 			 std::cerr << "File " << filePath << " does not exist\n";
-			 return EXIT_FAILURE;
+			 return makeError(GenericError::NOENT, "Faile does not exist");
 		 }
 
 		 if (!fs::is_regular_file(filePath)) {
 			 std::clog << "[failure]\n";
 			 std::cerr << "File " << filePath << " is not a regular file\n";
-			 return EXIT_FAILURE;
+			 return makeError(GenericError::IO, "Not a regular file");
 		 }
-
-
-//		std::error_code ec; // For noexcept overload usage.
-//		auto perms = fs::status(argv[i]).permissions();
-//		if ((perms & fs::perms::owner_read) != fs::perms::none &&
-//			(perms & fs::perms::group_read) != fs::perms::none &&
-//			(perms & fs::perms::others_read) != fs::perms::none)
-//		{
-
-//		}
 
 		 auto baseName = filePath.filename();
 		 auto baseNameView = StringView{baseName.c_str()};
-		 auto maybeNodeId = vfs.mknode(vfs.rootId(), baseNameView, fsId, 0, currentUser);
+		 auto maybeNodeId = vfs.mknode(vfs.rootId(), baseNameView, fsId, 0, user);
 		 if (!maybeNodeId) {
-			 std::cerr << "[Internal]: Failed to register file: " << maybeNodeId.getError() << '\n';
-			 return EXIT_FAILURE;
+			 std::cerr << "[Internal]: Failed to register file\n";
+			 return maybeNodeId.moveError();
 		 }
 
 		 auto boundName = vfs.nodeById(*maybeNodeId)
@@ -302,31 +269,90 @@ int main(int argc, char* const* argv) {
 
 		 if (!boundName) {
 			 std::cerr << "[Internal]: Failed to bind filename: " << fileName << '\n';
-			 return EXIT_FAILURE;
+			 return makeError(GenericError::IO, "Failed to bind a name");
 		 }
 
 		 std::clog << "[ok]\n";
 	}
 
+	return Ok();
+}
+
+
+Solace::Result<void, Error>
+mountRamFS(kasofs::Vfs& vfs, kasofs::User user) {
+	auto maybeRamFsDriverId = vfs.registerFilesystem<kasofs::RamFS>(4096);
+	if (!maybeRamFsDriverId) {
+		std::cerr << "[Internal]: Failed to register RAM fs driver\n";
+		return maybeRamFsDriverId.moveError();
+	}
+
 	// Create a couple of fake RAM fs files:
 	auto const ramFsId = *maybeRamFsDriverId;
-	auto maybeRamNodeId_1 = vfs.mknode(vfs.rootId(), "mock-1.ram", ramFsId, kasofs::RamFS::kNodeType, currentUser);
+	auto maybeRamNodeId_1 = vfs.mknode(vfs.rootId(), "mock-1.ram", ramFsId, kasofs::RamFS::kNodeType, user);
 	if (!maybeRamNodeId_1) {
-		std::cerr << "[Internal]: Failed to create tmp ram file: " << maybeRamNodeId_1.getError() << '\n';
-		return EXIT_FAILURE;
-	} else {
-		auto writeResult = vfs.open(currentUser, *maybeRamNodeId_1, kasofs::Permissions::WRITE)
-				.then([](kasofs::File&& file) {
-					auto str = StringLiteral{"Hello, this is a fake file\n"};
-					return file.write(str.view());
-				});
-		if (!writeResult) {
-			std::cerr << "[Internal]: Failed to write test message: " << writeResult.getError() << '\n';
-			return EXIT_FAILURE;
-		}
+		std::cerr << "[Internal]: Failed to create tmp ram file\n";
+		return maybeRamNodeId_1.moveError();
+	}
+
+	// Write content for a fake file of ram FS:
+	auto writeResult = vfs.open(user, *maybeRamNodeId_1, kasofs::Permissions::WRITE)
+			.then([](kasofs::File&& file) {
+				auto str = StringLiteral{"Hello, this is a fake file content\n"};
+				return file.write(str.view());
+			});
+
+	if (!writeResult) {
+		std::cerr << "[Internal]: Failed to write fake ramFS file\n";
+		return writeResult.moveError();
+	}
+
+	return Ok();
+}
+
+
+Solace::Result<kasofs::Vfs, Error>
+makeVFS(int argc, char* const* argv) {
+	auto currentUser = getSystemUser();
+	auto maybeVfs = apsio::Result<kasofs::Vfs>{types::okTag, in_place, currentUser, kasofs::FilePermissions{0777}};
+	auto& vfs = maybeVfs.unwrap();
+
+	auto maybeMounted = mountFiles(vfs, currentUser, argc, argv)
+			.then([&vfs, &currentUser]() { return mountRamFS(vfs, currentUser); });
+	if (!maybeMounted)
+		return maybeMounted.moveError();
+
+	return maybeVfs;
+}
+
+apsio::Server::Config
+configure() {
+	apsio::Server::Config config{};
+	config.authPolicy = configureAuthPolicy();
+
+	return config;
+}
+
+}  // anonymous namespace
+
+
+/**
+ * A simple 9p server serving files specifed on a commad line.
+ */
+int main(int argc, char* const* argv) {
+	if (argc < 2) {
+		return usage(argv[0]);
+	}
+
+	// Attempt to parse a dialstring - address to listen for incoming connections for.
+	auto maybeBind = tryParseDailString(argv[1]);
+	if (!maybeBind) {
+		return logAndExit("Error parsing dial-string", maybeBind);
 	}
 
 	asio::io_context iocontext;
+
+	// Setup handlers of CTRL-C and kill signals
 	asio::signal_set stopSignals{iocontext, SIGINT, SIGTERM};
 	stopSignals.async_wait([&] (asio::error_code const& error, int signal_number) {
 		if (error) {
@@ -334,17 +360,23 @@ int main(int argc, char* const* argv) {
 			return;
 		}
 
-		// TODO: It would be nice to know how many clients we dropped.
 		std::clog << "Terminate signal " << signal_number << " received. stopping" << std::endl;
 		iocontext.stop();
 	});
 
-	auto mockServer = apsio::SimpleServer{iocontext, vfs};
-	auto maybeListener = mockServer.listen(*maybeBind, mv(config));
+	// Create a new vfs with mounted files
+	auto maybeVfs = makeVFS(argc, argv);
+	if (!maybeVfs) {
+		return logAndExit("Create VFS", maybeVfs);
+	}
+
+	auto mockServer = apsio::SimpleServer{iocontext, *maybeVfs};
+	auto maybeListener = mockServer.listen(*maybeBind, configure());
 	if (!maybeListener) {
 		return logAndExit("Error attempting to listen", maybeListener);
 	}
 
+	// Setup signale handlers of SIGHUP - makes server stop accepting new connections.
 	asio::signal_set stopAcceptingSignals{iocontext, SIGHUP};
 	stopAcceptingSignals.async_wait([&] (asio::error_code const& error, int signal_number) {
 		if (error) {
@@ -353,8 +385,10 @@ int main(int argc, char* const* argv) {
 		}
 
 		std::clog << "Stop listening due to signal" << signal_number << std::endl;
-		maybeListener.unwrap()->terminate();
-		maybeListener.unwrap().reset();
+		if (auto& listener = *maybeListener) {
+			listener->terminate();
+			listener.reset();
+		}
 	});
 
 	std::clog << "Listening on: '" << *maybeBind << "'\n";
